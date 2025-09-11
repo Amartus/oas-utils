@@ -1,0 +1,14 @@
+openapi: 3.0.3
+paths: {}
+components:
+  requestBodies:
+    RB:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FromRB'
+  schemas:
+    FromRB:
+      type: string
+    AlsoUnused:
+      type: number

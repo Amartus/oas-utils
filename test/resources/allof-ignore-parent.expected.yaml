@@ -1,0 +1,32 @@
+openapi: 3.0.3
+paths:
+  /x:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponsePayload'
+components:
+  schemas:
+    Parent:
+      type: object
+    IgnoredParent:
+      type: object
+    Child:
+      allOf:
+        - $ref: '#/components/schemas/Parent'
+        - $ref: '#/components/schemas/IgnoredParent'
+        - type: object
+          properties:
+            foo:
+              type: string
+    ResponsePayload:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Parent'

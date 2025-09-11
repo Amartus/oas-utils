@@ -1,0 +1,21 @@
+openapi: 3.0.3
+paths:
+  /x:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+components:
+  responses:
+    Ok:
+      description: ok
+      headers:
+        X-Trace:
+          $ref: '#/components/headers/TraceId'
+  headers:
+    TraceId:
+      schema:
+        $ref: '#/components/schemas/Id'
+  schemas:
+    Id:
+      type: string

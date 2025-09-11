@@ -1,0 +1,20 @@
+openapi: 3.0.3
+paths:
+  /pet:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    KeepMe:
+      type: object
+      properties:
+        foo:
+          type: string
+    DropMe:
+      type: object

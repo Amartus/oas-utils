@@ -1,0 +1,24 @@
+openapi: 3.0.3
+paths:
+  /x:
+    post:
+      requestBody:
+        $ref: '#/components/requestBodies/Input'
+      responses:
+        '201':
+          description: ok
+components:
+  requestBodies:
+    Input:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Body'
+  schemas:
+    Body:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+    Id:
+      type: string
