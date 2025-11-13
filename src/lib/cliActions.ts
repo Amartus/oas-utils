@@ -7,6 +7,7 @@ import {
   removeFromOneOfByName,
   removeFromOneOfGlobally,
 } from "./removeFromOneOfByName.js";
+import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -143,6 +144,47 @@ export async function optimizeAllOf(  opts: { output?: string },
   const doc = parseYamlOrJson(data);
 
   optimizeAllOfComposition(doc);
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Converts allOf + discriminator patterns to oneOf + discriminator.
+ *
+ * @param opts - Options including output path and transformation options
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runAllOfToOneOf(
+  opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const data = await reader();
+  const doc = parseYamlOrJson(data);
+
+  if (!doc.components || !doc.components.schemas) {
+    console.error("[ERROR] The input document does not contain valid components.schemas.");
+    return;
+  }
+
+  const beforeSchemas = Object.keys(doc.components.schemas);
+  const topts: AllOfToOneOfOptions = {
+    removeDiscriminatorFromBase: Boolean(opts.removeDiscriminatorFromBase),
+    addDiscriminatorConst: opts.addDiscriminatorConst !== false,
+    ignoreSingleSpecialization: Boolean(opts.ignoreSingleSpecialization),
+  };
+
+  allOfToOneOf(doc, topts);
+
+  const afterSchemas = Object.keys(doc.components.schemas);
+  const newSchemas = afterSchemas.filter(s => !beforeSchemas.includes(s));
+
+  if (newSchemas.length > 0) {
+    console.error(`[ALLOF-TO-ONEOF] Created wrapper schema(s): ${newSchemas.join(", ")}`);
+  } else {
+    console.error("[INFO] No allOf + discriminator patterns found to convert.");
+  }
 
   await writeOutput(doc, opts.output, format);
 }

@@ -1,6 +1,6 @@
 # oas-utils
 
-Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas and to remove entries from oneOf. Use them as a CLI or as Redocly decorators.
+Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, and convert allOf + discriminator patterns to oneOf + discriminator. Use them as a CLI or as Redocly decorators.
 
 ## Definition of "unused schema"
 
@@ -26,6 +26,8 @@ This makes the `oas-utils` CLI available system-wide.
 
 ## CLI usage
 
+### remove-unused
+
 ```
 oas-utils remove-unused <input.yaml> -o output.yaml [--keep Name1 Name2] [--aggressive] [--ignore-parents NameX]
 # Read from stdin and write to stdout
@@ -37,6 +39,8 @@ Options:
 - --aggressive: also prune other unused components referenced from paths (responses, headers, requestBodies, parameters, examples, links, callbacks, securitySchemes). Non-referenced entries in these sections are removed.
 - --ignore-parents: schema names that shouldn't promote children via allOf (can be repeated). Useful to avoid allOf upward inclusion when the parent acts as an abstract/base.
 
+### remove-oneof
+
 Remove entries from oneOf and update discriminators:
 
 ```
@@ -47,10 +51,55 @@ oas-utils remove-oneof <input.yaml> --remove Cat
 oas-utils remove-oneof <input.yaml> --parent Pet --remove Cat --guess
 ```
 
-Options (remove-oneof):
+Options:
 - --parent: parent schema name containing oneOf; if omitted, removal is global across the document.
 - --remove: schema name(s) to remove; can be repeated.
 - --guess: expand each name to include variants starting with `<name>_`.
+
+### optimize-allof
+
+Optimize allOf composition by removing redundant references:
+
+```
+oas-utils optimize-allof <input.yaml> -o output.yaml
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+
+### allof-to-oneof
+
+Convert allOf + discriminator patterns to oneOf + discriminator. This is useful for transforming inheritance-based polymorphic schemas into composition-based ones.
+
+Specifically, it:
+1. Identifies base schemas with discriminators
+2. Finds concrete schemas that extend the base via allOf
+3. Optionally adds a const property to each concrete schema matching its discriminator value (enabled by default)
+4. Creates a new oneOf wrapper schema containing all concrete types
+5. Replaces references to the base schema with the wrapper schema (in polymorphic contexts)
+
+```
+oas-utils allof-to-oneof <input.yaml> -o output.yaml
+# Optionally remove discriminator from base schema
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --remove-discriminator-from-base
+# Optionally skip adding const to specialization schemas
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --no-add-discriminator-const
+# Optionally skip transformation if only one specialization is found
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --ignore-single-specialization
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+- --remove-discriminator-from-base: remove the discriminator from base schemas after conversion.
+- --no-add-discriminator-const: do not add const property with discriminator value to specialization schemas.
+- --ignore-single-specialization: skip oneOf transformation if only one specialization is found (useful for bases with only one concrete implementation).
+
+Example transformation (with addDiscriminatorConst enabled, the default):
+- Base schema `Animal` with discriminator `type` and mapping `{Cat: ..., Dog: ...}`
+- Concrete schemas `Cat` and `Dog` with `allOf: [{$ref: Animal}, {...}]`
+- Creates `AnimalPolymorphic` with `oneOf: [Cat, Dog]` and the same discriminator
+- Adds `type: {const: "Cat"}` to Cat's properties and `type: {const: "Dog"}` to Dog's properties
+- Replaces references to `Animal` with `AnimalPolymorphic` in array items and other polymorphic contexts
 
 ## As Redocly decorators
 
@@ -61,7 +110,7 @@ plugins:
   - ./node_modules/oas-utils/dist/redocly/plugin.js
 ```
 
-2) Enable the decorator:
+2) Enable the decorators:
 
 ```
 decorators:
@@ -75,6 +124,15 @@ decorators:
     parent: Pet             # optional; if omitted, removal is global
     remove: [Cat, Cat_variant1]
     guess: false
+
+  # Optimize allOf composition
+  oas-utils/optimize-allof: {}
+
+  # Convert allOf + discriminator to oneOf + discriminator
+  oas-utils/allof-to-oneof:
+    removeDiscriminatorFromBase: false
+    addDiscriminatorConst: true
+    ignoreSingleSpecialization: false
 ```
 
 3) Run bundling with Redocly CLI and the decorators will apply the transformations. With `aggressive: true`, unused non-schema components (responses, headers, requestBodies, etc.) are removed as well.
@@ -85,8 +143,13 @@ Notes:
 ## Programmatic usage
 
 ```
-import { removeUnusedSchemas } from 'oas-utils';
+import { removeUnusedSchemas, allOfToOneOf } from 'oas-utils';
+
+// Remove unused schemas
 const pruned = removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
+
+// Convert allOf + discriminator to oneOf + discriminator
+allOfToOneOf(doc, { removeDiscriminatorFromBase: false, addDiscriminatorConst: true });
 ```
 
 ## Notes

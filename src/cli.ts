@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf } from "./lib/cliActions.js";
 import YAML from "yaml";
 
 
@@ -89,6 +89,47 @@ program
   .action(async (input: string | undefined, opts: { output?: string }) => {
     await optimizeAllOf(opts, format, () => reader(input));
   });
+
+program
+  .command("allof-to-oneof")
+  .showHelpAfterError()
+  .description("Convert allOf + discriminator patterns to oneOf + discriminator")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .option(
+    "--remove-discriminator-from-base",
+    "Remove discriminator from base schemas after conversion",
+    false
+  )
+  .option(
+    "--no-add-discriminator-const",
+    "Do not add const property with discriminator value to specialization schemas",
+    true
+  )
+  .option(
+    "--ignore-single-specialization",
+    "Skip oneOf transformation if only one specialization is found",
+    false
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean }
+    ) => {
+      try {
+        await runAllOfToOneOf(opts, format, () => reader(input));
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
 
 if (process.argv.length <= 2) {
   program.help();
