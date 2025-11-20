@@ -1,33 +1,5 @@
-
-
-function updateDiscriminator(node: any, removeName: string): boolean {
-      if (node.discriminator && node.discriminator.mapping) {
-        for (const [key, ref] of Object.entries(node.discriminator.mapping)) {
-          const name = refToName(ref as string);
-          if (name === removeName) {
-            delete node.discriminator.mapping[key];
-            return true;
-          }
-        }
-      }
-      return false;
-}
-
-function updateOneOf(node: any, removeName: string): boolean {
-    if (!node  || ! Array.isArray(node.oneOf)) {
-        return false;
-    }
-
-    const beforeLength = node.oneOf.length;
-    node.oneOf = node.oneOf.filter((item: any) => {
-        if (typeof item?.$ref === "string") {
-          const name = refToName(item.$ref);
-          return name !== removeName;
-        }
-        return true;
-      });
-    return beforeLength !== node.oneOf.length;
-}
+import { refToName } from "./oasUtils.js";
+import { removeFromCollectionAndUpdateDiscriminator, traverseAndTransform } from "./schemaTransformUtils.js";
 
 /**
  * Remove a schema from all oneOfs in the OAS and update discriminator mappings globally.
@@ -36,43 +8,31 @@ function updateOneOf(node: any, removeName: string): boolean {
  * @returns Number of schemas modified
  */
 export function removeFromOneOfGlobally(doc: any, removeName: string): number {
+  const schemaNames = new Set([removeName]);
   let modified = 0;
-  function traverse(node: any) {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) {
-      node.forEach(traverse);
-      return;
-    }
 
-    if(updateOneOf(node, removeName)) {
-        updateDiscriminator(node, removeName);
-        modified++;
-    }
+  const transformer = (node: any): boolean => {
+    return removeFromCollectionAndUpdateDiscriminator(node, "oneOf", schemaNames);
+  };
 
-      
-    for (const k of Object.keys(node)) {
-      traverse(node[k]);
-    }
-  }
-  traverse(doc);
+  modified = traverseAndTransform(doc, transformer);
   return modified;
 }
-import { refToName } from './oasUtils.js';
 
 /**
  * Remove a schema from oneOf by name and update discriminator mappings.
  * @param doc OpenAPI document
  * @param parentSchemaName Name of the parent schema containing oneOf
  * @param removeName Name of the schema to remove from oneOf
+ * @returns true if schema was removed
  */
 export function removeFromOneOfByName(doc: any, parentSchemaName: string, removeName: string): boolean {
-    if (!doc?.components?.schemas) return false;
-    const parentSchema = doc.components.schemas[parentSchemaName];
-    const removed = updateOneOf(parentSchema, removeName);
-    if (removed) {
-      return updateDiscriminator(parentSchema, removeName);
-    }
-    return false;
+  if (!doc?.components?.schemas) return false;
+
+  const parentSchema = doc.components.schemas[parentSchemaName];
+  if (!parentSchema) return false;
+
+  return removeFromCollectionAndUpdateDiscriminator(parentSchema, "oneOf", new Set([removeName]));
 }
 
 

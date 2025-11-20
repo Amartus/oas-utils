@@ -51,6 +51,26 @@ function logSchemaChanges(before: string[], after: string[]) {
   }
 }
 
+/**
+ * Helper to validate that a document has components.schemas
+ * Logs error and returns false if invalid
+ */
+function validateComponentSchemas(doc: any): boolean {
+  if (!doc.components || !doc.components.schemas) {
+    console.error("[ERROR] The input document does not contain valid components.schemas.");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Helper to convert option values to arrays if needed
+ */
+function toArray(value: any): string[] {
+  if (Array.isArray(value)) return value;
+  return value ? String(value).split(",").map(s => s.trim()).filter(Boolean) : [];
+}
+
 export async function runRemoveUnused(
   opts: {
     output?: string;
@@ -61,10 +81,8 @@ export async function runRemoveUnused(
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
-
-  // Commander now passes keep and ignoreParents as arrays (variadic)
-  const keep = Array.isArray(opts.keep) ? opts.keep : (opts.keep ? String(opts.keep).split(",").map(s => s.trim()).filter(Boolean) : []);
-  const ignoreParents = Array.isArray(opts.ignoreParents) ? opts.ignoreParents : (opts.ignoreParents ? String(opts.ignoreParents).split(",").map(s => s.trim()).filter(Boolean) : []);
+  const keep = toArray(opts.keep);
+  const ignoreParents = toArray(opts.ignoreParents);
 
   const ropts: RemoveOptions = {
     keep,
@@ -72,8 +90,7 @@ export async function runRemoveUnused(
     ignoreParents,
   };
 
-  let doc: any, ext: string | undefined;
-  doc = parseYamlOrJson(await reader());
+  const doc = parseYamlOrJson(await reader());
   const beforeSchemas = Object.keys(doc?.components?.schemas ?? {});
   removeUnusedSchemas(doc, ropts);
   const afterSchemas = Object.keys(doc?.components?.schemas ?? {});
@@ -94,10 +111,7 @@ export async function runRemoveOneOf(
 ) {
   const doc = parseYamlOrJson(await reader());
 
-  if (!doc.components || !doc.components.schemas) {
-    console.error("[ERROR] The input document does not contain valid components.schemas.");
-    return;
-  }
+  if (!validateComponentSchemas(doc)) return;
 
   const toRemove = opts.guess ? opts.remove.flatMap((name) => guess(name, doc)) : opts.remove;
 
@@ -136,14 +150,16 @@ export async function runRemoveOneOf(
 /**
  * Optimizes allOf composition in the provided OpenAPI document.
  *
- * @param input - Path to the input OpenAPI document.
- * @param output - Path to the output OpenAPI document.
+ * @param opts - Options including output path
+ * @param format - Function to format output
+ * @param reader - Function to read input
  */
-export async function optimizeAllOf(  opts: { output?: string },
+export async function optimizeAllOf(
+  opts: { output?: string },
   format: (doc: any, target?: string) => string,
-  reader: () => Promise<string>) {
-  const data = await reader();
-  const doc = parseYamlOrJson(data);
+  reader: () => Promise<string>
+) {
+  const doc = parseYamlOrJson(await reader());
 
   optimizeAllOfComposition(doc);
 
@@ -162,13 +178,9 @@ export async function runAllOfToOneOf(
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
-  const data = await reader();
-  const doc = parseYamlOrJson(data);
+  const doc = parseYamlOrJson(await reader());
 
-  if (!doc.components || !doc.components.schemas) {
-    console.error("[ERROR] The input document does not contain valid components.schemas.");
-    return;
-  }
+  if (!validateComponentSchemas(doc)) return;
 
   const beforeSchemas = Object.keys(doc.components.schemas);
   const topts: AllOfToOneOfOptions = {
@@ -203,13 +215,9 @@ export async function runSealSchema(
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
-  const data = await reader();
-  const doc = parseYamlOrJson(data);
+  const doc = parseYamlOrJson(await reader());
 
-  if (!doc.components || !doc.components.schemas) {
-    console.error("[ERROR] The input document does not contain valid components.schemas.");
-    return;
-  }
+  if (!validateComponentSchemas(doc)) return;
 
   const beforeSchemaCount = Object.keys(doc.components.schemas).length;
   const sopts: SealSchemaOptions = {
@@ -240,13 +248,9 @@ export async function runCleanupDiscriminators(
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
-  const data = await reader();
-  const doc = parseYamlOrJson(data);
+  const doc = parseYamlOrJson(await reader());
 
-  if (!doc.components || !doc.components.schemas) {
-    console.error("[ERROR] The input document does not contain valid components.schemas.");
-    return;
-  }
+  if (!validateComponentSchemas(doc)) return;
 
   const result = cleanupDiscriminatorMappings(doc);
 
