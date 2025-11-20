@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "id": "https://example.com/schemas/company",
+  "title": "Company",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "departments": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Department" }
+    },
+    "headquarters": { "$ref": "#/definitions/Address" }
+  },
+  "required": ["name"],
+  "definitions": {
+    "Address": {
+      "type": "object",
+      "title": "Address",
+      "properties": {
+        "street": { "type": "string" },
+        "city": { "type": "string" },
+        "zipcode": { "type": "string" }
+      },
+      "required": ["street", "city"]
+    },
+    "Manager": {
+      "type": "object",
+      "title": "Manager",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Department": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "budget": { "type": "number", "minimum": 0 }
+          },
+          "required": ["name"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "manager": { "$ref": "#/definitions/Manager" }
+          },
+          "required": ["manager"]
+        }
+      ]
+    }
+  }
+}

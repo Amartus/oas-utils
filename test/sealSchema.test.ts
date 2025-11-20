@@ -476,4 +476,180 @@ describe("sealSchema", () => {
       ]);
     });
   });
+
+  describe("JSON Schema model sealing", () => {
+    it("seals a standalone JSON Schema model with unevaluatedProperties", () => {
+      const schema: any = {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        title: "User",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          email: { type: "string", format: "email" },
+        },
+        required: ["id", "name"],
+      };
+
+      sealSchema({ components: { schemas: { User: schema } } });
+
+      expect(schema.unevaluatedProperties).toBe(false);
+      expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(schema.title).toBe("User");
+    });
+
+    it("seals a JSON Schema model with nested objects", () => {
+      const schema: any = {
+        type: "object",
+        title: "Company",
+        properties: {
+          name: { type: "string" },
+          address: {
+            type: "object",
+            properties: {
+              street: { type: "string" },
+              city: { type: "string" },
+              zipcode: { type: "string" },
+            },
+          },
+          employees: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+              },
+            },
+          },
+        },
+      };
+
+      sealSchema({ components: { schemas: { Company: schema } } });
+
+      expect(schema.unevaluatedProperties).toBe(false);
+      expect(schema.properties.address.unevaluatedProperties).toBe(false);
+      expect(schema.properties.employees.items.unevaluatedProperties).toBe(false);
+    });
+
+    it("seals a JSON Schema model with composition", () => {
+      const schemas: any = {
+        BaseEntity: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+          },
+          required: ["id"],
+        },
+        Product: {
+          allOf: [
+            { $ref: "#/components/schemas/BaseEntity" },
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                price: { type: "number", minimum: 0 },
+              },
+              required: ["name"],
+            },
+          ],
+        },
+      };
+
+      sealSchema({ components: { schemas: schemas } });
+
+      // BaseEntity should be converted to wrapper + core
+      expect(schemas.BaseEntityCore).toBeDefined();
+      expect(schemas.BaseEntity.allOf).toBeDefined();
+      expect(schemas.BaseEntity.unevaluatedProperties).toBe(false);
+
+      // Product should reference BaseEntityCore
+      expect(schemas.Product.allOf[0].$ref).toBe("#/components/schemas/BaseEntityCore");
+      expect(schemas.Product.unevaluatedProperties).toBe(false);
+    });
+
+    it("preserves JSON Schema metadata while sealing", () => {
+      const schema: any = {
+        $id: "https://example.com/schemas/user",
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        title: "User Profile",
+        description: "A user account in the system",
+        type: "object",
+        properties: {
+          username: { type: "string", minLength: 3, maxLength: 50 },
+          email: { type: "string", format: "email" },
+          age: { type: "integer", minimum: 0, maximum: 150 },
+        },
+        required: ["username", "email"],
+        examples: [
+          { username: "john_doe", email: "john@example.com", age: 30 },
+        ],
+      };
+
+      sealSchema({ components: { schemas: { UserProfile: schema } } });
+
+      expect(schema.unevaluatedProperties).toBe(false);
+      expect(schema.$id).toBe("https://example.com/schemas/user");
+      expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(schema.title).toBe("User Profile");
+      expect(schema.description).toBe("A user account in the system");
+      expect(schema.examples).toEqual([
+        { username: "john_doe", email: "john@example.com", age: 30 },
+      ]);
+    });
+
+    it("seals root schema with interrelated $defs", () => {
+      const schema: any = loadSchemaFromFile("organization");
+
+      sealSchema({ components: { schemas: { Organization: schema } } });
+
+      // Root schema should be sealed
+      expect(schema.unevaluatedProperties).toBe(false);
+
+      // All subschemas in $defs should be sealed
+      expect(schema.$defs.Address.unevaluatedProperties).toBe(false);
+      expect(schema.$defs.Employee.unevaluatedProperties).toBe(false);
+      
+      // Department uses allOf, so both parts should be sealed
+      expect(schema.$defs.Department.allOf[0].unevaluatedProperties).toBe(false);
+      expect(schema.$defs.Department.allOf[1].unevaluatedProperties).toBe(false);
+
+      // Metadata should be preserved
+      expect(schema.title).toBe("Organization");
+      expect(schema.$id).toBe("https://example.com/schemas/organization");
+      expect(schema.$defs.Address.title).toBe("Address");
+      expect(schema.$defs.Employee.title).toBe("Employee");
+      
+      // References should be maintained
+      expect(schema.properties.headquarters.$ref).toBe("#/$defs/Address");
+      expect(schema.$defs.Department.allOf[1].properties.manager.$ref).toBe("#/$defs/Employee");
+    });
+
+    it("seals root schema with definitions (JSON Schema Draft 4)", () => {
+      const schema: any = loadSchemaFromFile("company");
+
+      sealSchema({ components: { schemas: { Company: schema } } });
+
+      // Root schema should be sealed
+      expect(schema.unevaluatedProperties).toBe(false);
+
+      // All subschemas in definitions should be sealed
+      expect(schema.definitions.Address.unevaluatedProperties).toBe(false);
+      expect(schema.definitions.Manager.unevaluatedProperties).toBe(false);
+      
+      // Department uses allOf, so both parts should be sealed
+      expect(schema.definitions.Department.allOf[0].unevaluatedProperties).toBe(false);
+      expect(schema.definitions.Department.allOf[1].unevaluatedProperties).toBe(false);
+
+      // Metadata should be preserved
+      expect(schema.title).toBe("Company");
+      expect(schema.definitions.Address.title).toBe("Address");
+      expect(schema.definitions.Manager.title).toBe("Manager");
+      
+      // References should be maintained
+      expect(schema.properties.headquarters.$ref).toBe("#/definitions/Address");
+      expect(schema.definitions.Department.allOf[1].properties.manager.$ref).toBe("#/definitions/Manager");
+    });
+  });
 });

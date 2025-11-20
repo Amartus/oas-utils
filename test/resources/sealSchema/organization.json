@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/organization",
+  "title": "Organization",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "departments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Department" }
+    },
+    "headquarters": { "$ref": "#/$defs/Address" }
+  },
+  "required": ["name"],
+  "$defs": {
+    "Address": {
+      "type": "object",
+      "title": "Address",
+      "properties": {
+        "street": { "type": "string" },
+        "city": { "type": "string" },
+        "zipcode": { "type": "string" },
+        "country": { "type": "string", "default": "USA" }
+      },
+      "required": ["street", "city"]
+    },
+    "Employee": {
+      "type": "object",
+      "title": "Employee",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "startDate": { "type": "string", "format": "date" }
+      },
+      "required": ["id", "name"]
+    },
+    "Department": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "budget": { "type": "number", "minimum": 0 }
+          },
+          "required": ["name"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "manager": { "$ref": "#/$defs/Employee" },
+            "employees": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Employee" }
+            }
+          },
+          "required": ["manager"]
+        }
+      ]
+    }
+  }
+}

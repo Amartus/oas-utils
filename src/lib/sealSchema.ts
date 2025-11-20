@@ -30,6 +30,18 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
   const schemas: Record<string, any> | undefined = doc.components?.schemas;
   if (!schemas || typeof schemas !== "object") return doc;
 
+  // Handle each schema's $defs and definitions (for JSON Schema models)
+  for (const [schemaName, schema] of Object.entries(schemas)) {
+    if (schema && typeof schema === "object") {
+      if (schema.$defs && typeof schema.$defs === "object") {
+        sealNestedSchemas(schema, "$defs", sealing);
+      }
+      if (schema.definitions && typeof schema.definitions === "object") {
+        sealNestedSchemas(schema, "definitions", sealing);
+      }
+    }
+  }
+
   // Step 1: Find all schemas referenced in allOf (core candidates)
   const referencedInAllOf = new Set<string>();
   for (const schema of Object.values(schemas)) {
@@ -121,6 +133,138 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
 }
 
 /**
+ * Recursively seal nested schemas within a schema.
+ * This handles JSON Schema models that contain nested subschemas in $defs or definitions.
+ */
+function sealNestedSchemas(schema: any, defsKey: "$defs" | "definitions", sealing: string): void {
+  if (!schema || typeof schema !== "object" || !schema[defsKey]) return;
+
+  const defs = schema[defsKey];
+
+  // Step 1: Find all schemas referenced in allOf within $defs
+  const referencedInAllOf = new Set<string>();
+  for (const def of Object.values(defs)) {
+    if (!def || typeof def !== "object") continue;
+    const defAny = def as any;
+    if (!Array.isArray(defAny.allOf)) continue;
+
+    for (const item of defAny.allOf) {
+      if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
+        const refName = extractDefRefName((item as any).$ref);
+        if (refName && defs[refName]) {
+          referencedInAllOf.add(refName);
+        }
+      }
+    }
+  }
+
+  // Step 2: Create Core variants for schemas referenced in allOf
+  const coreMapping = new Map<string, string>();
+  for (const name of referencedInAllOf) {
+    const def = defs[name];
+    if (
+      def &&
+      typeof def === "object" &&
+      !isPreSealed(def) &&
+      isObjectLike(def)
+    ) {
+      const coreName = `${name}Core`;
+      coreMapping.set(name, coreName);
+
+      const coreSchema = deepClone(def);
+      removeSealing(coreSchema);
+
+      const refPath = defsKey === "$defs" ? `#/$defs/${coreName}` : `#/definitions/${coreName}`;
+      const wrapper: any = {
+        allOf: [{ $ref: refPath }],
+      };
+      wrapper[sealing] = false;
+
+      const coreSchemaAny = coreSchema as any;
+      if (coreSchemaAny.description) {
+        wrapper.description = coreSchemaAny.description;
+        delete coreSchemaAny.description;
+      }
+
+      defs[coreName] = coreSchema;
+      defs[name] = wrapper;
+    }
+  }
+
+  // Step 3: Rewrite references inside allOf to point to Core variants
+  for (const [originalName, coreName] of coreMapping.entries()) {
+    updateNestedAllOfReferences(defs, originalName, coreName, defsKey);
+  }
+
+  // Step 4: Seal composition roots and direct-only objects in $defs
+  for (const [name, def] of Object.entries(defs)) {
+    if (!def || typeof def !== "object") continue;
+
+    const defAny = def as any;
+    if (defAny[sealing] === false || defAny.additionalProperties === false) {
+      continue;
+    }
+
+    const isWrapper =
+      defAny.allOf &&
+      defAny.allOf.length === 1 &&
+      typeof (defAny.allOf[0] as any).$ref === "string" &&
+      (defAny.allOf[0] as any).$ref.includes("Core");
+
+    if (!isWrapper && (defAny.allOf || defAny.anyOf || defAny.oneOf) && isObjectLike(def)) {
+      defAny[sealing] = false;
+    } else if (!coreMapping.has(name) && isObjectLike(def) && !name.endsWith("Core")) {
+      defAny[sealing] = false;
+    }
+  }
+
+  // Step 5: Recursively seal inline schemas in $defs
+  sealInlineSchemas(defs, sealing);
+
+  // Step 6: Seal the root schema itself
+  if (isObjectLike(schema) && !isPreSealed(schema)) {
+    schema[sealing] = false;
+  }
+}
+
+/**
+ * Update all allOf references in nested schemas from original schema to core schema.
+ */
+function updateNestedAllOfReferences(
+  defs: Record<string, any>,
+  originalName: string,
+  coreName: string,
+  defsKey: "$defs" | "definitions"
+): void {
+  const refPrefix = defsKey === "$defs" ? "#/$defs" : "#/definitions";
+  const originalRef = `${refPrefix}/${originalName}`;
+  const coreRef = `${refPrefix}/${coreName}`;
+
+  for (const def of Object.values(defs)) {
+    if (!def || typeof def !== "object") continue;
+    if (!Array.isArray((def as any).allOf)) continue;
+
+    for (const item of (def as any).allOf) {
+      if (item && typeof item === "object" && (item as any).$ref === originalRef) {
+        (item as any).$ref = coreRef;
+      }
+    }
+  }
+}
+
+/**
+ * Extract the schema name from a $defs or definitions reference
+ * (e.g., "#/$defs/Employee" or "#/definitions/Employee" -> "Employee")
+ */
+function extractDefRefName(ref: string): string {
+  const defsMatch = ref.match(/#\/\$defs\/([^/]+)$/);
+  if (defsMatch) return defsMatch[1];
+  const defsMatch2 = ref.match(/#\/definitions\/([^/]+)$/);
+  if (defsMatch2) return defsMatch2[1];
+  return "";
+}
+
+/**
  * Update all allOf references from original schema to core schema.
  */
 function updateAllOfReferences(
@@ -133,9 +277,9 @@ function updateAllOfReferences(
 
   for (const schema of Object.values(schemas)) {
     if (!schema || typeof schema !== "object") continue;
-    if (!Array.isArray(schema.allOf)) continue;
+    if (!Array.isArray((schema as any).allOf)) continue;
 
-    for (const item of schema.allOf) {
+    for (const item of (schema as any).allOf) {
       if (item && typeof item === "object" && (item as any).$ref === originalRef) {
         (item as any).$ref = coreRef;
       }
