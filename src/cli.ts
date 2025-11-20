@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema } from "./lib/cliActions.js";
 import YAML from "yaml";
 
 
@@ -124,6 +124,47 @@ program
     ) => {
       try {
         await runAllOfToOneOf(opts, format, () => reader(input));
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+program
+  .command("seal-schema")
+  .showHelpAfterError()
+  .description("Seal object schemas to prevent additional properties")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .option(
+    "--use-unevaluated-properties",
+    "Use unevaluatedProperties: false instead of additionalProperties: false (default: true)",
+    true
+  )
+  .option(
+    "--use-additional-properties",
+    "Use additionalProperties: false instead of unevaluatedProperties: false",
+    false
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: { output?: string; useUnevaluatedProperties?: boolean; useAdditionalProperties?: boolean }
+    ) => {
+      try {
+        const useUnevaluated = !opts.useAdditionalProperties;
+        await runSealSchema(
+          { output: opts.output, useUnevaluatedProperties: useUnevaluated },
+          format,
+          () => reader(input)
+        );
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;

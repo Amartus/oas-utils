@@ -8,6 +8,7 @@ import {
   removeFromOneOfGlobally,
 } from "./removeFromOneOfByName.js";
 import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
+import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -185,6 +186,43 @@ export async function runAllOfToOneOf(
   } else {
     console.error("[INFO] No allOf + discriminator patterns found to convert.");
   }
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Seals object schemas to prevent additional properties.
+ *
+ * @param opts - Options including output path and sealing options
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runSealSchema(
+  opts: { output?: string; useUnevaluatedProperties?: boolean },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const data = await reader();
+  const doc = parseYamlOrJson(data);
+
+  if (!doc.components || !doc.components.schemas) {
+    console.error("[ERROR] The input document does not contain valid components.schemas.");
+    return;
+  }
+
+  const beforeSchemaCount = Object.keys(doc.components.schemas).length;
+  const sopts: SealSchemaOptions = {
+    useUnevaluatedProperties: opts.useUnevaluatedProperties !== false,
+  };
+
+  sealSchema(doc, sopts);
+
+  const afterSchemaCount = Object.keys(doc.components.schemas).length;
+  const sealingKeyword = sopts.useUnevaluatedProperties ? "unevaluatedProperties" : "additionalProperties";
+
+  console.error(
+    `[SEAL-SCHEMA] Sealed schemas (${sealingKeyword}). Total schemas: ${beforeSchemaCount} -> ${afterSchemaCount}`
+  );
 
   await writeOutput(doc, opts.output, format);
 }

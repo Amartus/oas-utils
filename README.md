@@ -101,6 +101,41 @@ Example transformation (with addDiscriminatorConst enabled, the default):
 - Adds `type: {const: "Cat"}` to Cat's properties and `type: {const: "Dog"}` to Dog's properties
 - Replaces references to `Animal` with `AnimalPolymorphic` in array items and other polymorphic contexts
 
+### seal-schema
+
+Seal object schemas to prevent additional properties. This ensures every final object shape exposed in the API is sealed (no additional properties allowed), without breaking schemas that are extended via `allOf`.
+
+The algorithm:
+1. Identifies schemas that are bases for extension (referenced in `allOf`)
+2. For each such schema, creates a `Core` variant and a sealed wrapper
+3. Rewrites `allOf` references to point to `Core` variants (allowing extension)
+4. Seals composition roots (`allOf`, `anyOf`, `oneOf`) and direct-use schemas
+
+This ensures:
+- **Objects used directly** in fields or arrays are fully sealed
+- **Objects used as bases** for extension remain unsealed internally but are sealed at the wrapper level
+- **anyOf/oneOf compositions** remain valid alternatives and are sealed at the outer level
+
+```
+oas-utils seal-schema <input.yaml> -o output.yaml
+# Use unevaluatedProperties: false (default, recommended for JSON Schema 2019-09+)
+oas-utils seal-schema <input.yaml> -o output.yaml --use-unevaluated-properties
+# Use additionalProperties: false instead
+oas-utils seal-schema <input.yaml> -o output.yaml --use-additional-properties
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+- --use-unevaluated-properties: use `unevaluatedProperties: false` (default, better for JSON Schema 2019-09+).
+- --use-additional-properties: use `additionalProperties: false` instead.
+
+Example transformation:
+- Original `Animal` schema (object-like, referenced in `allOf` by `Cat`)
+- Becomes: `AnimalCore` (unsealed original) + `Animal` wrapper with `allOf: [{$ref: AnimalCore}]` and `unevaluatedProperties: false`
+- `Cat` now uses `allOf: [{$ref: AnimalCore}, {...}]` allowing safe extension
+- Direct references to `Animal` point to the sealed wrapper
+- Inline objects and composition roots are sealed with appropriate keywords
+
 ## As Redocly decorators
 
 1) Add the plugin to `plugins` in your `redocly.yaml` (path relative to the config):
@@ -133,6 +168,10 @@ decorators:
     removeDiscriminatorFromBase: false
     addDiscriminatorConst: true
     ignoreSingleSpecialization: false
+
+  # Seal object schemas
+  oas-utils/seal-schema:
+    useUnevaluatedProperties: true
 ```
 
 3) Run bundling with Redocly CLI and the decorators will apply the transformations. With `aggressive: true`, unused non-schema components (responses, headers, requestBodies, etc.) are removed as well.
@@ -143,13 +182,16 @@ Notes:
 ## Programmatic usage
 
 ```
-import { removeUnusedSchemas, allOfToOneOf } from 'oas-utils';
+import { removeUnusedSchemas, allOfToOneOf, sealSchema } from 'oas-utils';
 
 // Remove unused schemas
 const pruned = removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
 
 // Convert allOf + discriminator to oneOf + discriminator
 allOfToOneOf(doc, { removeDiscriminatorFromBase: false, addDiscriminatorConst: true });
+
+// Seal object schemas
+sealSchema(doc, { useUnevaluatedProperties: true });
 ```
 
 ## Notes
