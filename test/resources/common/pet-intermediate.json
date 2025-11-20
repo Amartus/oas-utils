@@ -1,0 +1,19 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/Animal" },
+    {
+      "type": "object",
+      "required": ["owner"],
+      "properties": {
+        "owner": { "type": "string", "example": "John Doe" }
+      }
+    }
+  ],
+  "discriminator": {
+    "propertyName": "type",
+    "mapping": {
+      "Dog": "#/components/schemas/Dog"
+    }
+  },
+  "description": "A pet (intermediate schema extending Animal)"
+}

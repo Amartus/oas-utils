@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { removeUnusedSchemas } from "../src/lib/removeUnusedSchemas";
+import { testSchemas } from "./schemaLoader.js";
 
 async function loadYaml(file: string): Promise<any> {
   const raw = await fs.readFile(file, "utf8");

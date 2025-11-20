@@ -1,0 +1,11 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/BaseResult" },
+    {
+      "type": "object",
+      "properties": {
+        "data": { "type": "string" }
+      }
+    }
+  ]
+}

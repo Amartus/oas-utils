@@ -1,0 +1,14 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/Animal" },
+    {
+      "type": "object",
+      "required": ["breed"],
+      "properties": {
+        "breed": { "type": "string", "example": "Labrador" },
+        "isTrainedAsServiceDog": { "type": "boolean", "example": false }
+      }
+    }
+  ],
+  "description": "A dog"
+}

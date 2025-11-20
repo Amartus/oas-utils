@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { removeFromOneOfGlobally } from "../src/lib/removeFromOneOfByName";
+import { testSchemas } from "./schemaLoader.js";
 
 describe("removeFromOneOfGlobally", () => {
   it("removes schema from all top-level oneOfs and updates discriminators", () => {

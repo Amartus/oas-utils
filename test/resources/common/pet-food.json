@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "example": "Kibble" },
+    "foodType": { "type": "string", "example": "dry" }
+  },
+  "description": "Pet food"
+}

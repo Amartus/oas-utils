@@ -1,0 +1,13 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/Vehicle" },
+    {
+      "type": "object",
+      "required": ["numDoors"],
+      "properties": {
+        "numDoors": { "type": "integer", "minimum": 1, "example": 4 }
+      }
+    }
+  ],
+  "description": "A car"
+}

@@ -1,27 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { buildInheritanceGraph, getDescendants, getAncestors } from "../src/lib/oasUtils.js";
+import { testSchemas, withProperties } from "./schemaLoader.js";
 
 describe("oasUtils", () => {
   describe("buildInheritanceGraph", () => {
     it("builds graph from simple inheritance", () => {
       const schemas = {
-        Animal: {
+        Animal: testSchemas.simpleTypeWithMapping({
+          Cat: "#/components/schemas/Cat",
+          Dog: "#/components/schemas/Dog",
+        }),
+        Cat: testSchemas.withAllOfRef("Animal", {
           type: "object",
-          properties: { type: { type: "string" } },
-          discriminator: { propertyName: "type", mapping: { Cat: "#/components/schemas/Cat", Dog: "#/components/schemas/Dog" } },
-        },
-        Cat: {
-          allOf: [
-            { $ref: "#/components/schemas/Animal" },
-            { type: "object", properties: { meow: { type: "boolean" } } },
-          ],
-        },
-        Dog: {
-          allOf: [
-            { $ref: "#/components/schemas/Animal" },
-            { type: "object", properties: { bark: { type: "boolean" } } },
-          ],
-        },
+          properties: { meow: { type: "boolean" } },
+        }),
+        Dog: testSchemas.withAllOfRef("Animal", {
+          type: "object",
+          properties: { bark: { type: "boolean" } },
+        }),
       };
 
       const graph = buildInheritanceGraph(schemas);
@@ -34,21 +30,18 @@ describe("oasUtils", () => {
 
     it("builds graph from multi-level inheritance", () => {
       const schemas = {
-        Animal: {
-          allOf: [{ type: "object", properties: { id: { type: "string" } } }],
-        },
-        Pet: {
-          allOf: [
-            { $ref: "#/components/schemas/Animal" },
-            { type: "object", properties: { owner: { type: "string" } } },
-          ],
-        },
-        Dog: {
-          allOf: [
-            { $ref: "#/components/schemas/Pet" },
-            { type: "object", properties: { breed: { type: "string" } } },
-          ],
-        },
+        Animal: testSchemas.withAllOfRef("", {
+          type: "object",
+          properties: { id: { type: "string" } },
+        }),
+        Pet: testSchemas.withAllOfRef("Animal", {
+          type: "object",
+          properties: { owner: { type: "string" } },
+        }),
+        Dog: testSchemas.withAllOfRef("Pet", {
+          type: "object",
+          properties: { breed: { type: "string" } },
+        }),
       };
 
       const graph = buildInheritanceGraph(schemas);
@@ -61,14 +54,11 @@ describe("oasUtils", () => {
 
     it("builds graph with multiple compositions", () => {
       const schemas = {
-        Food: {
+        Food: testSchemas.food(),
+        Animal: testSchemas.withAllOfRef("Food", {
           type: "object",
-          properties: { name: { type: "string" } },
-        },
-        Animal: {
-          allOf: [{ $ref: "#/components/schemas/Food" }],
           properties: { id: { type: "string" } },
-        },
+        }),
         Dog: {
           allOf: [
             { $ref: "#/components/schemas/Animal" },
@@ -93,10 +83,7 @@ describe("oasUtils", () => {
 
     it("ignores schemas without allOf", () => {
       const schemas = {
-        SimpleSchema: {
-          type: "object",
-          properties: { id: { type: "string" } },
-        },
+        SimpleSchema: testSchemas.simpleId(),
       };
 
       const graph = buildInheritanceGraph(schemas);
@@ -107,15 +94,15 @@ describe("oasUtils", () => {
   describe("getDescendants", () => {
     it("gets direct descendants", () => {
       const schemas = {
-        Animal: {
-          discriminator: { propertyName: "type", mapping: {} },
-        },
-        Cat: {
-          allOf: [{ $ref: "#/components/schemas/Animal" }],
-        },
-        Dog: {
-          allOf: [{ $ref: "#/components/schemas/Animal" }],
-        },
+        Animal: testSchemas.simpleTypeWithMapping({}),
+        Cat: testSchemas.withAllOfRef("Animal", {
+          type: "object",
+          properties: { meow: { type: "boolean" } },
+        }),
+        Dog: testSchemas.withAllOfRef("Animal", {
+          type: "object",
+          properties: { bark: { type: "boolean" } },
+        }),
       };
 
       const graph = buildInheritanceGraph(schemas);
@@ -128,18 +115,19 @@ describe("oasUtils", () => {
 
     it("gets transitive descendants", () => {
       const schemas = {
-        Animal: {
+        Animal: testSchemas.simpleId(),
+        Pet: testSchemas.withAllOfRef("Animal", {
           type: "object",
-        },
-        Pet: {
-          allOf: [{ $ref: "#/components/schemas/Animal" }],
-        },
-        Dog: {
-          allOf: [{ $ref: "#/components/schemas/Pet" }],
-        },
-        Puppy: {
-          allOf: [{ $ref: "#/components/schemas/Dog" }],
-        },
+          properties: { owner: { type: "string" } },
+        }),
+        Dog: testSchemas.withAllOfRef("Pet", {
+          type: "object",
+          properties: { breed: { type: "string" } },
+        }),
+        Puppy: testSchemas.withAllOfRef("Dog", {
+          type: "object",
+          properties: { age: { type: "integer" } },
+        }),
       };
 
       const graph = buildInheritanceGraph(schemas);
@@ -162,16 +150,11 @@ describe("oasUtils", () => {
   describe("getAncestors", () => {
     it("gets direct ancestors", () => {
       const schemas = {
-        Animal: {
+        Animal: testSchemas.simpleType(),
+        Dog: testSchemas.withAllOfRef("Animal", {
           type: "object",
-          properties: { type: { type: "string" } },
-        },
-        Dog: {
-          allOf: [
-            { $ref: "#/components/schemas/Animal" },
-            { type: "object", properties: { breed: { type: "string" } } },
-          ],
-        },
+          properties: { breed: { type: "string" } },
+        }),
       };
 
       const ancestors = getAncestors("Dog", schemas);
@@ -182,18 +165,19 @@ describe("oasUtils", () => {
 
     it("gets transitive ancestors", () => {
       const schemas = {
-        Animal: {
+        Animal: testSchemas.simpleId(),
+        Pet: testSchemas.withAllOfRef("Animal", {
           type: "object",
-        },
-        Pet: {
-          allOf: [{ $ref: "#/components/schemas/Animal" }],
-        },
-        Dog: {
-          allOf: [{ $ref: "#/components/schemas/Pet" }],
-        },
-        Puppy: {
-          allOf: [{ $ref: "#/components/schemas/Dog" }],
-        },
+          properties: { owner: { type: "string" } },
+        }),
+        Dog: testSchemas.withAllOfRef("Pet", {
+          type: "object",
+          properties: { breed: { type: "string" } },
+        }),
+        Puppy: testSchemas.withAllOfRef("Dog", {
+          type: "object",
+          properties: { age: { type: "integer" } },
+        }),
       };
 
       const ancestors = getAncestors("Puppy", schemas);
@@ -206,12 +190,11 @@ describe("oasUtils", () => {
 
     it("handles multiple ancestors", () => {
       const schemas = {
-        Food: {
+        Food: testSchemas.food(),
+        Animal: testSchemas.withAllOfRef("Food", {
           type: "object",
-        },
-        Animal: {
-          allOf: [{ $ref: "#/components/schemas/Food" }],
-        },
+          properties: { id: { type: "string" } },
+        }),
         Dog: {
           allOf: [
             { $ref: "#/components/schemas/Animal" },
@@ -229,9 +212,7 @@ describe("oasUtils", () => {
 
     it("returns empty set for schema with no ancestors", () => {
       const schemas = {
-        Root: {
-          type: "object",
-        },
+        Root: testSchemas.simpleId(),
       };
 
       const ancestors = getAncestors("Root", schemas);

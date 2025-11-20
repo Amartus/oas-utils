@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "required": ["id", "type", "name"],
+  "properties": {
+    "id": { "type": "string", "description": "Unique identifier", "example": "a1" },
+    "type": { "type": "string", "description": "Animal type", "example": "Cat" },
+    "name": { "type": "string", "example": "Whiskers" },
+    "age": { "type": "integer", "minimum": 0, "example": 3 },
+    "gender": { "type": "string", "enum": ["male", "female", "unknown"], "example": "female" }
+  },
+  "discriminator": { "propertyName": "type" },
+  "description": "Abstract animal type"
+}

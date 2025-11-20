@@ -1,0 +1,14 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/Animal" },
+    {
+      "type": "object",
+      "required": ["huntingSkill"],
+      "properties": {
+        "huntingSkill": { "type": "string", "enum": ["low", "medium", "high"], "example": "medium" },
+        "livesLeft": { "type": "integer", "minimum": 0, "maximum": 9, "example": 9 }
+      }
+    }
+  ],
+  "description": "A cat"
+}

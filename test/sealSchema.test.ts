@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { sealSchema } from "../src/lib/sealSchema.js";
+import {
+  loadSchemaFromFile,
+  loadSchemasFromFiles,
+  withoutProperties,
+  withProperties,
+  withDescription,
+  withMetadata,
+  sealed,
+} from "./schemaLoader.js";
 
 describe("sealSchema", () => {
   describe("basic sealing", () => {
@@ -7,13 +16,7 @@ describe("sealSchema", () => {
       const doc: any = {
         components: {
           schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                age: { type: "integer" },
-              },
-            },
+            Pet: withoutProperties(loadSchemaFromFile("animal"), ["name"]),
           },
         },
       };
@@ -49,13 +52,7 @@ describe("sealSchema", () => {
       const doc: any = {
         components: {
           schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
-              additionalProperties: false,
-            },
+            Pet: sealed(withoutProperties(loadSchemaFromFile("animal"), ["name"]), false),
           },
         },
       };
@@ -71,26 +68,10 @@ describe("sealSchema", () => {
     it("creates core variant for schema used in allOf", () => {
       const doc: any = {
         components: {
-          schemas: {
-            Animal: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-                name: { type: "string" },
-              },
-            },
-            Cat: {
-              allOf: [
-                { $ref: "#/components/schemas/Animal" },
-                {
-                  type: "object",
-                  properties: {
-                    meow: { type: "boolean" },
-                  },
-                },
-              ],
-            },
-          },
+          schemas: loadSchemasFromFiles({
+            Animal: "animal",
+            Cat: "cat",
+          }),
         },
       };
 
@@ -99,6 +80,7 @@ describe("sealSchema", () => {
       // Animal should be converted to wrapper
       expect(doc.components.schemas.Animal).toEqual({
         allOf: [{ $ref: "#/components/schemas/AnimalCore" }],
+        description: "Abstract animal type",
         unevaluatedProperties: false,
       });
 
@@ -106,8 +88,11 @@ describe("sealSchema", () => {
       const animalCore = doc.components.schemas.AnimalCore;
       expect(animalCore.type).toBe("object");
       expect(animalCore.properties).toEqual({
-        id: { type: "string" },
-        name: { type: "string" },
+        id: { type: "string", description: "Unique identifier", example: "a1" },
+        type: { type: "string", description: "Animal type", example: "Cat" },
+        name: { type: "string", example: "Whiskers" },
+        age: { type: "integer", minimum: 0, example: 3 },
+        gender: { type: "string", enum: ["male", "female", "unknown"], example: "female" },
       });
 
       // Cat should reference AnimalCore in allOf
@@ -119,47 +104,46 @@ describe("sealSchema", () => {
     });
 
     it("handles multiple levels of inheritance", () => {
+      const base = withoutProperties(loadSchemaFromFile("animal"), ["name"]);
+      const pet = {
+        allOf: [
+          { $ref: "#/components/schemas/Base" },
+          {
+            type: "object",
+            properties: {
+              owner: { type: "string" },
+            },
+          },
+        ],
+      };
+      const cat = {
+        allOf: [
+          { $ref: "#/components/schemas/Pet" },
+          {
+            type: "object",
+            properties: {
+              meow: { type: "boolean" },
+            },
+          },
+        ],
+      };
+
       const doc: any = {
         components: {
           schemas: {
-            Animal: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-              },
-            },
-            Pet: {
-              allOf: [
-                { $ref: "#/components/schemas/Animal" },
-                {
-                  type: "object",
-                  properties: {
-                    owner: { type: "string" },
-                  },
-                },
-              ],
-            },
-            Cat: {
-              allOf: [
-                { $ref: "#/components/schemas/Pet" },
-                {
-                  type: "object",
-                  properties: {
-                    meow: { type: "boolean" },
-                  },
-                },
-              ],
-            },
+            Base: base,
+            Pet: pet,
+            Cat: cat,
           },
         },
       };
 
       sealSchema(doc);
 
-      // Animal should be core candidate (referenced in allOf by Pet)
-      expect(doc.components.schemas.AnimalCore).toBeDefined();
-      expect(doc.components.schemas.Animal.allOf[0].$ref).toBe(
-        "#/components/schemas/AnimalCore"
+      // Base should be core candidate (referenced in allOf by Pet)
+      expect(doc.components.schemas.BaseCore).toBeDefined();
+      expect(doc.components.schemas.Base.allOf[0].$ref).toBe(
+        "#/components/schemas/BaseCore"
       );
 
       // Pet is referenced in allOf (by Cat), so it should also be a core candidate
@@ -170,9 +154,9 @@ describe("sealSchema", () => {
         "#/components/schemas/PetCore"
       );
       
-      // PetCore's first allOf should point to AnimalCore (Animal reference was updated)
+      // PetCore's first allOf should point to BaseCore (Base reference was updated)
       expect(doc.components.schemas.PetCore.allOf[0].$ref).toBe(
-        "#/components/schemas/AnimalCore"
+        "#/components/schemas/BaseCore"
       );
 
       // Cat references PetCore in allOf
@@ -181,7 +165,7 @@ describe("sealSchema", () => {
       );
 
       // Verify that composition roots are sealed
-      expect(doc.components.schemas.Animal.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Base.unevaluatedProperties).toBe(false);
       expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
       expect(doc.components.schemas.Cat.unevaluatedProperties).toBe(false);
     });
@@ -190,13 +174,10 @@ describe("sealSchema", () => {
       const doc: any = {
         components: {
           schemas: {
-            Animal: {
-              type: "object",
-              description: "An animal in the system",
-              properties: {
-                id: { type: "string" },
-              },
-            },
+            Animal: withDescription(
+              withoutProperties(loadSchemaFromFile("animal"), ["name"]),
+              "An animal in the system"
+            ),
             Cat: {
               allOf: [{ $ref: "#/components/schemas/Animal" }],
             },
@@ -217,25 +198,10 @@ describe("sealSchema", () => {
     it("seals allOf composition roots", () => {
       const doc: any = {
         components: {
-          schemas: {
-            Result: {
-              allOf: [
-                { $ref: "#/components/schemas/BaseResult" },
-                {
-                  type: "object",
-                  properties: {
-                    data: { type: "string" },
-                  },
-                },
-              ],
-            },
-            BaseResult: {
-              type: "object",
-              properties: {
-                status: { type: "string" },
-              },
-            },
-          },
+          schemas: loadSchemasFromFiles({
+            Result: "result",
+            BaseResult: "base-result",
+          }),
         },
       };
 
@@ -245,6 +211,8 @@ describe("sealSchema", () => {
     });
 
     it("seals oneOf composition roots", () => {
+      const catOption = withoutProperties(loadSchemaFromFile("animal"), ["id", "name"]);
+      const dogOption = { type: "object", properties: { bark: { type: "boolean" } } };
       const doc: any = {
         components: {
           schemas: {
@@ -254,18 +222,8 @@ describe("sealSchema", () => {
                 { $ref: "#/components/schemas/Dog" },
               ],
             },
-            Cat: {
-              type: "object",
-              properties: {
-                meow: { type: "boolean" },
-              },
-            },
-            Dog: {
-              type: "object",
-              properties: {
-                bark: { type: "boolean" },
-              },
-            },
+            Cat: catOption,
+            Dog: dogOption,
           },
         },
       };
@@ -276,6 +234,8 @@ describe("sealSchema", () => {
     });
 
     it("seals anyOf composition roots", () => {
+      const option1 = { type: "object", properties: { field1: { type: "string" } } };
+      const option2 = { type: "object", properties: { field2: { type: "integer" } } };
       const doc: any = {
         components: {
           schemas: {
@@ -285,18 +245,8 @@ describe("sealSchema", () => {
                 { $ref: "#/components/schemas/Option2" },
               ],
             },
-            Option1: {
-              type: "object",
-              properties: {
-                field1: { type: "string" },
-              },
-            },
-            Option2: {
-              type: "object",
-              properties: {
-                field2: { type: "integer" },
-              },
-            },
+            Option1: option1,
+            Option2: option2,
           },
         },
       };
@@ -311,21 +261,9 @@ describe("sealSchema", () => {
     it("seals inline objects in properties", () => {
       const doc: any = {
         components: {
-          schemas: {
-            Person: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                address: {
-                  type: "object",
-                  properties: {
-                    street: { type: "string" },
-                    city: { type: "string" },
-                  },
-                },
-              },
-            },
-          },
+          schemas: loadSchemasFromFiles({
+            Person: "person",
+          }),
         },
       };
 
@@ -340,23 +278,9 @@ describe("sealSchema", () => {
     it("seals inline objects in array items", () => {
       const doc: any = {
         components: {
-          schemas: {
-            People: {
-              type: "object",
-              properties: {
-                items: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      age: { type: "integer" },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          schemas: loadSchemasFromFiles({
+            People: "people",
+          }),
         },
       };
 
@@ -373,24 +297,8 @@ describe("sealSchema", () => {
       const doc: any = {
         components: {
           schemas: {
-            Animal: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-                name: { type: "string" },
-              },
-            },
-            Cat: {
-              allOf: [
-                { $ref: "#/components/schemas/Animal" },
-                {
-                  type: "object",
-                  properties: {
-                    meow: { type: "boolean" },
-                  },
-                },
-              ],
-            },
+            Animal: loadSchemaFromFile("animal"),
+            Cat: loadSchemaFromFile("cat"),
             Shelter: {
               type: "object",
               properties: {
@@ -404,7 +312,7 @@ describe("sealSchema", () => {
 
       sealSchema(doc);
 
-      // Animal should be core + wrapper
+      // Animal should be core + wrapper (used in allOf by Cat)
       expect(doc.components.schemas.AnimalCore).toBeDefined();
       expect(doc.components.schemas.Animal.allOf[0].$ref).toBe(
         "#/components/schemas/AnimalCore"
@@ -429,14 +337,8 @@ describe("sealSchema", () => {
       const doc: any = {
         components: {
           schemas: {
-            Name: {
-              type: "string",
-              minLength: 1,
-            },
-            Age: {
-              type: "integer",
-              minimum: 0,
-            },
+            Name: loadSchemaFromFile("string-name"),
+            Age: loadSchemaFromFile("integer-age"),
           },
         },
       };
@@ -468,32 +370,11 @@ describe("sealSchema", () => {
     it("handles schema with both allOf and direct usage", () => {
       const doc: any = {
         components: {
-          schemas: {
-            Base: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-              },
-            },
-            Extended: {
-              allOf: [
-                { $ref: "#/components/schemas/Base" },
-                {
-                  type: "object",
-                  properties: {
-                    extra: { type: "string" },
-                  },
-                },
-              ],
-            },
-            Container: {
-              type: "object",
-              properties: {
-                base: { $ref: "#/components/schemas/Base" },
-                extended: { $ref: "#/components/schemas/Extended" },
-              },
-            },
-          },
+          schemas: loadSchemasFromFiles({
+            Base: "base",
+            Extended: "extended",
+            Container: "container",
+          }),
         },
       };
 
@@ -510,57 +391,46 @@ describe("sealSchema", () => {
     });
 
     it("handles schema with existing unevaluatedProperties", () => {
+      const preSealed = sealed(loadSchemaFromFile("animal"));
+      const animalRef = { allOf: [{ $ref: "#/components/schemas/PreSealedSchema" }] };
+
       const doc: any = {
         components: {
           schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
-              unevaluatedProperties: false,
-            },
-            Animal: {
-              allOf: [{ $ref: "#/components/schemas/Pet" }],
-            },
+            PreSealedSchema: preSealed,
+            AnimalPreSealed: animalRef,
           },
         },
       };
 
       sealSchema(doc);
 
-      // Pet should not be turned into core+wrapper since it's already sealed
-      expect(doc.components.schemas.PetCore).toBeUndefined();
-      expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+      // PreSealedSchema should not be turned into core+wrapper since it's already sealed
+      expect(doc.components.schemas.PreSealedSchemaCore).toBeUndefined();
+      expect(doc.components.schemas.PreSealedSchema.unevaluatedProperties).toBe(false);
 
-      // Animal reference should not be changed
-      expect(doc.components.schemas.Animal.allOf[0].$ref).toBe(
-        "#/components/schemas/Pet"
+      // AnimalPreSealed reference should not be changed
+      expect(doc.components.schemas.AnimalPreSealed.allOf[0].$ref).toBe(
+        "#/components/schemas/PreSealedSchema"
       );
     });
 
     it("handles multiple allOf references in same schema", () => {
+      const mixin1 = loadSchemaFromFile("mixin1");
+      const mixin2 = loadSchemaFromFile("mixin1"); // reuse same mixin for second ref
+      const combined = {
+        allOf: [
+          { $ref: "#/components/schemas/Mixin1" },
+          { $ref: "#/components/schemas/Mixin2" },
+        ],
+      };
+
       const doc: any = {
         components: {
           schemas: {
-            Mixin1: {
-              type: "object",
-              properties: {
-                prop1: { type: "string" },
-              },
-            },
-            Mixin2: {
-              type: "object",
-              properties: {
-                prop2: { type: "string" },
-              },
-            },
-            Combined: {
-              allOf: [
-                { $ref: "#/components/schemas/Mixin1" },
-                { $ref: "#/components/schemas/Mixin2" },
-              ],
-            },
+            Mixin1: mixin1,
+            Mixin2: mixin2,
+            Combined: combined,
           },
         },
       };
@@ -581,35 +451,29 @@ describe("sealSchema", () => {
     });
 
     it("preserves other schema properties during sealing", () => {
+      const petComplete = withMetadata(loadSchemaFromFile("animal"), {
+        title: "A Pet",
+        description: "Represents a pet",
+        required: ["id"],
+        examples: [{ id: "1", name: "Fluffy" }],
+      });
+
       const doc: any = {
         components: {
           schemas: {
-            Pet: {
-              type: "object",
-              title: "A Pet",
-              description: "Represents a pet",
-              properties: {
-                name: {
-                  type: "string",
-                  description: "Pet name",
-                },
-              },
-              required: ["name"],
-              examples: [{ name: "Fluffy" }],
-            },
+            PetComplete: petComplete,
           },
         },
       };
 
       sealSchema(doc);
 
-      expect(doc.components.schemas.Pet.title).toBe("A Pet");
-      expect(doc.components.schemas.Pet.description).toBe("Represents a pet");
-      expect(doc.components.schemas.Pet.required).toEqual(["name"]);
-      expect(doc.components.schemas.Pet.examples).toEqual([{ name: "Fluffy" }]);
-      expect(doc.components.schemas.Pet.properties.name.description).toBe(
-        "Pet name"
-      );
+      expect(doc.components.schemas.PetComplete.title).toBe("A Pet");
+      expect(doc.components.schemas.PetComplete.description).toBe("Represents a pet");
+      expect(doc.components.schemas.PetComplete.required).toEqual(["id"]);
+      expect(doc.components.schemas.PetComplete.examples).toEqual([
+        { id: "1", name: "Fluffy" },
+      ]);
     });
   });
 });

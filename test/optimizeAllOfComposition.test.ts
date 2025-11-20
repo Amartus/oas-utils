@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { optimizeAllOfComposition } from "../src/lib/optimizeAllOfComposition.js";
+import { testSchemas } from "./schemaLoader.js";
 
 describe("optimizeAllOfComposition", () => {
   it("removes redundant allOf references (C: [B,A], B: [A] -> C: [B])", () => {

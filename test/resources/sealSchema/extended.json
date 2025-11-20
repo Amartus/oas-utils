@@ -1,0 +1,11 @@
+{
+  "allOf": [
+    { "$ref": "#/components/schemas/Base" },
+    {
+      "type": "object",
+      "properties": {
+        "extra": { "type": "string" }
+      }
+    }
+  ]
+}

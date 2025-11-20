@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["prop1"],
+  "properties": {
+    "prop1": { "type": "string", "example": "value1" }
+  },
+  "description": "First mixin"
+}

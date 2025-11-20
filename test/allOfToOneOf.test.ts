@@ -1,126 +1,32 @@
 import { describe, it, expect } from "vitest";
 import { allOfToOneOf } from "../src/lib/allOfToOneOf.js";
+import { testSchemas, withProperties } from "./schemaLoader.js";
 
 describe("allOfToOneOf", () => {
   it("converts allOf + discriminator to oneOf + discriminator with const properties", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            required: ["id", "type", "name"],
-            properties: {
-              id: {
-                type: "string",
-                description: "Unique identifier for the animal",
-                example: "a1",
-              },
-              type: {
-                type: "string",
-                description: "Discriminator property - concrete animal type",
-                example: "Cat",
-              },
-              name: {
-                type: "string",
-                example: "Whiskers",
-              },
-              age: {
-                type: "integer",
-                minimum: 0,
-                example: 3,
-              },
-              gender: {
-                type: "string",
-                enum: ["male", "female", "unknown"],
-                example: "female",
-              },
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-                Dog: "#/components/schemas/Dog",
-              },
-            },
-            description: "Abstract animal type. Use the `type` discriminator to select a concrete schema.",
-          },
-          Cat: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              {
-                type: "object",
-                required: ["huntingSkill"],
-                properties: {
-                  huntingSkill: {
-                    type: "string",
-                    enum: ["low", "medium", "high"],
-                    description: "Hunting skill level for the cat",
-                    example: "medium",
-                  },
-                  livesLeft: {
-                    type: "integer",
-                    minimum: 0,
-                    maximum: 9,
-                    description: "Mythical number of lives remaining",
-                    example: 9,
-                  },
-                },
-              },
-            ],
-            description: "Cat specialization of Animal.",
-          },
-          Dog: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              {
-                type: "object",
-                required: ["isTrained"],
-                properties: {
-                  isTrained: {
-                    type: "boolean",
-                    description: "Whether the dog is trained",
-                    example: true,
-                  },
-                  breed: {
-                    type: "string",
-                    example: "Labrador",
-                  },
-                  favoriteToy: {
-                    type: "string",
-                    example: "rubber ball",
-                  },
-                },
-              },
-            ],
-            description: "Dog specialization of Animal.",
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+            Dog: "#/components/schemas/Dog",
+          }),
+          Cat: testSchemas.catSpecialized(),
+          Dog: testSchemas.dogSpecialized(),
           Human: {
             type: "object",
             required: ["id", "name"],
             properties: {
-              id: {
-                type: "string",
-                example: "h1",
-                description: "Unique identifier for the human",
-              },
-              name: {
-                type: "string",
-                example: "Alex Johnson",
-              },
-              age: {
-                type: "integer",
-                minimum: 0,
-                example: 32,
-              },
+              id: { type: "string", example: "h1", description: "Unique identifier for the human" },
+              name: { type: "string", example: "Alex Johnson" },
+              age: { type: "integer", minimum: 0, example: 32 },
               pets: {
                 type: "array",
                 description: "Array of animals (polymorphic via discriminator)",
-                items: {
-                  $ref: "#/components/schemas/Animal",
-                },
+                items: { $ref: "#/components/schemas/Animal" },
               },
             },
-            description: "A human who may own zero or more pets. Each pet is an Animal and can be a Cat or Dog.",
+            description: "A human who may own zero or more pets",
           },
         },
       },
@@ -162,18 +68,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-              },
-            },
-          },
-          Cat: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+          }),
+          Cat: testSchemas.catSpecialized(),
         },
       },
     };
@@ -186,18 +84,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-              },
-            },
-          },
-          Cat: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+          }),
+          Cat: testSchemas.catSpecialized(),
         },
       },
     };
@@ -210,18 +100,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-              },
-            },
-          },
-          Cat: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+          }),
+          Cat: testSchemas.catSpecialized(),
         },
       },
     };
@@ -237,18 +119,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Dog: "#/components/schemas/Dog",
-              },
-            },
-          },
-          Dog: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Dog: "#/components/schemas/Dog",
+          }),
+          Dog: testSchemas.dogSpecialized(),
         },
       },
     };
@@ -265,18 +139,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-              },
-            },
-          },
-          Cat: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+          }),
+          Cat: testSchemas.catSpecialized(),
           Vehicle: {
             type: "object",
             discriminator: {
@@ -345,18 +211,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Dog: "#/components/schemas/Dog",
-              },
-            },
-          },
-          Dog: {
-            allOf: [{ $ref: "#/components/schemas/Animal" }],
-          },
+          Animal: testSchemas.animalWithDiscriminator({
+            Dog: "#/components/schemas/Dog",
+          }),
+          Dog: testSchemas.dogSpecialized(),
           Pack: {
             type: "object",
             properties: {
@@ -387,30 +245,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Vehicle: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              type: { type: "string" },
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Car: "#/components/schemas/Car",
-              },
-            },
-          },
-          Car: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              {
-                type: "object",
-                properties: {
-                  numDoors: { type: "integer" },
-                },
-              },
-            ],
-          },
+          Vehicle: testSchemas.vehicleWithDiscriminator({
+            Car: "#/components/schemas/Car",
+          }),
+          Car: testSchemas.carSpecialized(),
         },
       },
     };
@@ -427,30 +265,10 @@ describe("allOfToOneOf", () => {
     const doc: any = {
       components: {
         schemas: {
-          Vehicle: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              type: { type: "string" },
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Car: "#/components/schemas/Car",
-              },
-            },
-          },
-          Car: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              {
-                type: "object",
-                properties: {
-                  numDoors: { type: "integer" },
-                },
-              },
-            ],
-          },
+          Vehicle: testSchemas.vehicleWithDiscriminator({
+            Car: "#/components/schemas/Car",
+          }),
+          Car: testSchemas.carSpecialized(),
         },
       },
     };
@@ -486,24 +304,7 @@ describe("allOfToOneOf", () => {
             },
           },
           // Intermediate schema with discriminator (extends Animal)
-          Pet: {
-            type: "object",
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              {
-                type: "object",
-                properties: {
-                  owner: { type: "string" },
-                },
-              },
-            ],
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Dog: "#/components/schemas/Dog",
-              },
-            },
-          },
+          Pet: testSchemas.petIntermediate(),
           // Concrete schema with multi-level inheritance
           Dog: {
             allOf: [
@@ -519,12 +320,7 @@ describe("allOfToOneOf", () => {
             ],
           },
           // Helper schema
-          PetFood: {
-            type: "object",
-            properties: {
-              foodType: { type: "string" },
-            },
-          },
+          PetFood: testSchemas.food(),
         },
       },
     };

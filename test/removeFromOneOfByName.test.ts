@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { removeFromOneOfByName } from "../src/lib/removeFromOneOfByName";
+import { testSchemas } from "./schemaLoader.js";
 
 describe("removeFromOneOfByName", () => {
   it("removes schema from oneOf and updates discriminator", () => {

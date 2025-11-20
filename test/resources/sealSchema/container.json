@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "base": { "$ref": "#/components/schemas/Base" },
+    "extended": { "$ref": "#/components/schemas/Extended" }
+  }
+}
