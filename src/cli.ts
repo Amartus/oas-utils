@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators } from "./lib/cliActions.js";
 import YAML from "yaml";
 
 
@@ -165,6 +165,32 @@ program
           format,
           () => reader(input)
         );
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+program
+  .command("cleanup-discriminators")
+  .showHelpAfterError()
+  .description("Clean up discriminator mappings by removing references to non-existent schemas")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: { output?: string }
+    ) => {
+      try {
+        await runCleanupDiscriminators(opts, format, () => reader(input));
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;

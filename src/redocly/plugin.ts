@@ -3,6 +3,7 @@ import RemoveFromOneOfDecorator from "./remove-from-oneof-decorator.js";
 import OptimizeAllOfDecorator from "./optimize-allof-decorator.js";
 import AllOfToOneOfDecorator from "./allof-to-oneof-decorator.js";
 import SealSchemaDecorator from "./seal-schema-decorator.js";
+import CleanupDiscriminatorsDecorator from "./cleanup-discriminator-decorator.js";
 
 export default function oasRemoveUnusedPlugin() {
   return {
@@ -15,6 +16,7 @@ export default function oasRemoveUnusedPlugin() {
     "optimize-allof": OptimizeAllOfDecorator,
     "allof-to-oneof": AllOfToOneOfDecorator,
     "seal-schema": SealSchemaDecorator,
+    "cleanup-discriminators": CleanupDiscriminatorsDecorator,
     // Back-compat aliases
     "remove-unused-schemas": RemoveUnusedDecorator,
     "remove-from-oneof": RemoveFromOneOfDecorator,
@@ -26,6 +28,7 @@ export default function oasRemoveUnusedPlugin() {
     "optimize-allof": OptimizeAllOfDecorator,
     "allof-to-oneof": AllOfToOneOfDecorator,
     "seal-schema": SealSchemaDecorator,
+    "cleanup-discriminators": CleanupDiscriminatorsDecorator,
     // Back-compat aliases
     "remove-unused-schemas": RemoveUnusedDecorator,
     "remove-from-oneof": RemoveFromOneOfDecorator,

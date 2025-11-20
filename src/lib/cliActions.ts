@@ -9,6 +9,7 @@ import {
 } from "./removeFromOneOfByName.js";
 import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
 import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
+import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -223,6 +224,45 @@ export async function runSealSchema(
   console.error(
     `[SEAL-SCHEMA] Sealed schemas (${sealingKeyword}). Total schemas: ${beforeSchemaCount} -> ${afterSchemaCount}`
   );
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Cleans up discriminator mappings by removing entries pointing to non-existent schemas.
+ *
+ * @param opts - Options including output path
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runCleanupDiscriminators(
+  opts: { output?: string },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const data = await reader();
+  const doc = parseYamlOrJson(data);
+
+  if (!doc.components || !doc.components.schemas) {
+    console.error("[ERROR] The input document does not contain valid components.schemas.");
+    return;
+  }
+
+  const result = cleanupDiscriminatorMappings(doc);
+
+  if (result.schemasChecked > 0) {
+    console.error(`[CLEANUP-DISCRIMINATORS] Checked ${result.schemasChecked} schema(s) with discriminators.`);
+    if (result.mappingsRemoved > 0) {
+      console.error(`[CLEANUP-DISCRIMINATORS] Removed ${result.mappingsRemoved} mapping(s).`);
+      for (const detail of result.details) {
+        console.error(`[CLEANUP-DISCRIMINATORS]   Schema '${detail.schema}': removed mappings [${detail.removed.join(", ")}]`);
+      }
+    } else {
+      console.error("[INFO] All discriminator mappings are valid (no changes needed).");
+    }
+  } else {
+    console.error("[INFO] No schemas with discriminators found.");
+  }
 
   await writeOutput(doc, opts.output, format);
 }

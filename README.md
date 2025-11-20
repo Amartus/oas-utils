@@ -1,6 +1,6 @@
 # oas-utils
 
-Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, and convert allOf + discriminator patterns to oneOf + discriminator. Use them as a CLI or as Redocly decorators.
+Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, convert allOf + discriminator patterns to oneOf + discriminator, and clean up discriminator mappings. Use them as a CLI or as Redocly decorators.
 
 ## Definition of "unused schema"
 
@@ -101,6 +101,24 @@ Example transformation (with addDiscriminatorConst enabled, the default):
 - Adds `type: {const: "Cat"}` to Cat's properties and `type: {const: "Dog"}` to Dog's properties
 - Replaces references to `Animal` with `AnimalPolymorphic` in array items and other polymorphic contexts
 
+### cleanup-discriminators
+
+Clean up discriminator mappings by removing entries that reference non-existent schemas. This is useful when schemas are removed but discriminator mappings are not updated, leaving dangling references.
+
+```
+oas-utils cleanup-discriminators <input.yaml> -o output.yaml
+# Read from stdin and write to stdout
+cat openapi.yaml | oas-utils cleanup-discriminators > cleaned.yaml
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+
+Example:
+- Original discriminator mapping: `{cat: '#/components/schemas/Cat', dog: '#/components/schemas/Dog', bird: '#/components/schemas/Bird'}`
+- After removing `Bird` schema: mapping entries `bird` is invalid
+- After cleanup: `{cat: '#/components/schemas/Cat', dog: '#/components/schemas/Dog'}`
+
 ### seal-schema
 
 Seal object schemas to prevent additional properties. This ensures every final object shape exposed in the API is sealed (no additional properties allowed), without breaking schemas that are extended via `allOf`.
@@ -169,6 +187,9 @@ decorators:
     addDiscriminatorConst: true
     ignoreSingleSpecialization: false
 
+  # Clean up discriminator mappings
+  oas-utils/cleanup-discriminators: {}
+
   # Seal object schemas
   oas-utils/seal-schema:
     useUnevaluatedProperties: true
@@ -182,13 +203,17 @@ Notes:
 ## Programmatic usage
 
 ```
-import { removeUnusedSchemas, allOfToOneOf, sealSchema } from 'oas-utils';
+import { removeUnusedSchemas, allOfToOneOf, sealSchema, cleanupDiscriminatorMappings } from 'oas-utils';
 
 // Remove unused schemas
-const pruned = removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
+removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
 
 // Convert allOf + discriminator to oneOf + discriminator
 allOfToOneOf(doc, { removeDiscriminatorFromBase: false, addDiscriminatorConst: true });
+
+// Clean up discriminator mappings
+const result = cleanupDiscriminatorMappings(doc);
+console.log(`Removed ${result.mappingsRemoved} invalid mappings from ${result.schemasChecked} schemas`);
 
 // Seal object schemas
 sealSchema(doc, { useUnevaluatedProperties: true });

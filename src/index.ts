@@ -4,3 +4,4 @@ export * from './lib/optimizeAllOfComposition.js';
 export * from './lib/allOfToOneOf.js';
 export * from './lib/sealSchema.js';
 export * from './lib/oasUtils.js';
+export * from './lib/cleanupDiscriminatorMappings.js';
