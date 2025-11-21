@@ -127,6 +127,11 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
       typeof (schema.allOf[0] as any).$ref === "string" &&
       (schema.allOf[0] as any).$ref.includes("Core");
 
+    // Only seal if there's sealable content (properties or composition)
+    if (!hasSealableContent(schema)) {
+      continue;
+    }
+
     // Seal composition roots (allOf/anyOf/oneOf) - except wrappers we just created
     if (
       !isWrapper &&
@@ -230,6 +235,11 @@ function sealNestedSchemas(schema: any, defsKey: "$defs" | "definitions", sealin
       typeof (defAny.allOf[0] as any).$ref === "string" &&
       (defAny.allOf[0] as any).$ref.includes("Core");
 
+    // Only seal if there's sealable content
+    if (!hasSealableContent(def)) {
+      continue;
+    }
+
     if (!isWrapper && (defAny.allOf || defAny.anyOf || defAny.oneOf) && isObjectLike(def)) {
       defAny[sealing] = false;
     } else if (!coreMapping.has(name) && isObjectLike(def) && !name.endsWith("Core")) {
@@ -240,8 +250,8 @@ function sealNestedSchemas(schema: any, defsKey: "$defs" | "definitions", sealin
   // Step 5: Recursively seal inline schemas in $defs
   sealInlineSchemas(defs, sealing);
 
-  // Step 6: Seal the root schema itself
-  if (isObjectLike(schema) && !isPreSealed(schema)) {
+  // Step 6: Seal the root schema itself if it has sealable content
+  if (hasSealableContent(schema) && isObjectLike(schema) && !isPreSealed(schema)) {
     schema[sealing] = false;
   }
 }
@@ -313,7 +323,7 @@ function sealInlineSchemas(schemas: Record<string, any>, sealing: string): void 
   const sealRecursive = (obj: any): void => {
     if (!obj || typeof obj !== "object") return;
 
-    if (isObjectLike(obj) && !isPreSealed(obj)) {
+    if (isObjectLike(obj) && !isPreSealed(obj) && hasSealableContent(obj)) {
       const hasComposition = Boolean(obj.allOf || obj.anyOf || obj.oneOf);
       const hasRef = Boolean(findRefsInObject(obj).length > 0);
 
@@ -371,6 +381,20 @@ function isObjectLike(schema: any): boolean {
   if (!schema || typeof schema !== "object") return false;
   return (
     schema.type === "object" ||
+    Boolean(schema.properties) ||
+    Boolean(schema.allOf) ||
+    Boolean(schema.anyOf) ||
+    Boolean(schema.oneOf)
+  );
+}
+
+/**
+ * Check if a schema has sealable content (properties or composition keywords).
+ * This ensures we only seal schemas that actually define object structure.
+ */
+function hasSealableContent(schema: any): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  return (
     Boolean(schema.properties) ||
     Boolean(schema.allOf) ||
     Boolean(schema.anyOf) ||
