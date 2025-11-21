@@ -638,6 +638,7 @@ describe("sealSchema", () => {
       expect(schema.definitions.Address.unevaluatedProperties).toBe(false);
       expect(schema.definitions.Manager.unevaluatedProperties).toBe(false);
       
+      
       // Department uses allOf, so both parts should be sealed
       expect(schema.definitions.Department.allOf[0].unevaluatedProperties).toBe(false);
       expect(schema.definitions.Department.allOf[1].unevaluatedProperties).toBe(false);
@@ -652,4 +653,138 @@ describe("sealSchema", () => {
       expect(schema.definitions.Department.allOf[1].properties.manager.$ref).toBe("#/definitions/Manager");
     });
   });
+
+  describe("standalone JSON Schema support", () => {
+    it("seals a standalone JSON schema with unevaluatedProperties", () => {
+      const standalonSchema: any = {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        title: "WbCareProduct",
+        type: "object",
+        properties: {
+          careLevel: {
+            type: "string",
+            description: "The care level",
+          },
+        },
+        required: ["careLevel"],
+      };
+
+      const result = sealSchema(standalonSchema, { useUnevaluatedProperties: true });
+
+      // The result should be the sealed schema, not wrapped in OpenAPI structure
+      expect(result.unevaluatedProperties).toBe(false);
+      expect(result.title).toBe("WbCareProduct");
+      expect(result.type).toBe("object");
+      expect(result.properties.careLevel).toEqual({
+        type: "string",
+        description: "The care level",
+      });
+      expect(result.required).toEqual(["careLevel"]);
+      expect(result.components).toBeUndefined();
+    });
+
+    it("seals a standalone JSON schema with additionalProperties", () => {
+      const standalonSchema: any = {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        title: "Product",
+        type: "object",
+        properties: {
+          name: { type: "string" },
+        },
+      };
+
+      const result = sealSchema(standalonSchema, { useUnevaluatedProperties: false });
+
+      expect(result.additionalProperties).toBe(false);
+      expect(result.unevaluatedProperties).toBeUndefined();
+    });
+
+    it("seals a standalone schema without title", () => {
+      const standalonSchema: any = {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+        },
+      };
+
+      const result = sealSchema(standalonSchema);
+
+      expect(result.unevaluatedProperties).toBe(false);
+      expect(result.properties).toEqual({ id: { type: "string" } });
+    });
+
+    it("seals a standalone schema with nested $defs", () => {
+      const standalonSchema: any = {
+        title: "Container",
+        type: "object",
+        properties: {
+          item: { $ref: "#/$defs/Item" },
+        },
+        $defs: {
+          Item: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+            },
+          },
+        },
+      };
+
+      const result = sealSchema(standalonSchema);
+
+      expect(result.unevaluatedProperties).toBe(false);
+      expect(result.$defs.Item.unevaluatedProperties).toBe(false);
+    });
+
+    it("seals a standalone schema with allOf composition", () => {
+      const standalonSchema: any = {
+        title: "ExtendedPerson",
+        type: "object",
+        allOf: [
+          {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+            },
+          },
+          {
+            type: "object",
+            properties: {
+              age: { type: "integer" },
+            },
+          },
+        ],
+      };
+
+      const result = sealSchema(standalonSchema);
+
+      expect(result.unevaluatedProperties).toBe(false);
+      expect(result.allOf[0].unevaluatedProperties).toBe(false);
+      expect(result.allOf[1].unevaluatedProperties).toBe(false);
+    });
+
+    it("preserves metadata when sealing a standalone schema", () => {
+      const standalonSchema: any = {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        $id: "https://example.com/product.schema.json",
+        title: "Product",
+        description: "A product schema",
+        type: "object",
+        properties: {
+          name: { type: "string" },
+        },
+        examples: [{ name: "Widget" }],
+      };
+
+      const result = sealSchema(standalonSchema);
+
+      expect(result.$schema).toBe("http://json-schema.org/draft-07/schema#");
+      expect(result.$id).toBe("https://example.com/product.schema.json");
+      expect(result.title).toBe("Product");
+      expect(result.description).toBe("A product schema");
+      expect(result.examples).toEqual([{ name: "Widget" }]);
+      expect(result.unevaluatedProperties).toBe(false);
+    });
+  });
 });
+

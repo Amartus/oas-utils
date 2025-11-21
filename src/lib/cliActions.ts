@@ -217,23 +217,15 @@ export async function runSealSchema(
 ) {
   const doc = parseYamlOrJson(await reader());
 
-  if (!validateComponentSchemas(doc)) return;
-
-  const beforeSchemaCount = Object.keys(doc.components.schemas).length;
   const sopts: SealSchemaOptions = {
     useUnevaluatedProperties: opts.useUnevaluatedProperties !== false,
   };
 
-  sealSchema(doc, sopts);
+  const result = sealSchema(doc, sopts);
 
-  const afterSchemaCount = Object.keys(doc.components.schemas).length;
   const sealingKeyword = sopts.useUnevaluatedProperties ? "unevaluatedProperties" : "additionalProperties";
 
-  console.error(
-    `[SEAL-SCHEMA] Sealed schemas (${sealingKeyword}). Total schemas: ${beforeSchemaCount} -> ${afterSchemaCount}`
-  );
-
-  await writeOutput(doc, opts.output, format);
+  await writeOutput(result, opts.output, format);
 }
 
 /**

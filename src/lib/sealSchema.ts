@@ -18,7 +18,7 @@ export interface SealSchemaOptions {
  * 4. Rewrite refs inside allOf to point to Core variants
  * 5. Seal composition roots (allOf/anyOf/oneOf) and direct objects
  *
- * @param doc - OpenAPI document to transform
+ * @param doc - OpenAPI document or standalone JSON Schema to transform
  * @param opts - Optional configuration
  */
 export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
@@ -27,7 +27,21 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
   const sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
 
-  const schemas: Record<string, any> | undefined = doc.components?.schemas;
+  // Check if this is a standalone JSON Schema (not an OpenAPI document)
+  const isStandalone = isStandaloneJsonSchema(doc);
+  
+  let schemas: Record<string, any> | undefined;
+  let wrappedName: string = "";
+
+  if (isStandalone) {
+    // Wrap the standalone schema in an OpenAPI structure
+    wrappedName = doc.title || "Root";
+    schemas = {};
+    schemas[wrappedName] = doc;
+  } else {
+    schemas = doc.components?.schemas;
+  }
+
   if (!schemas || typeof schemas !== "object") return doc;
 
   // Handle each schema's $defs and definitions (for JSON Schema models)
@@ -128,6 +142,11 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
 
   // Step 5: Recursively seal inline object schemas
   sealInlineSchemas(schemas, sealing);
+
+  // If this was a standalone schema, extract and return it
+  if (wrappedName && isStandalone) {
+    return schemas[wrappedName];
+  }
 
   return doc;
 }
@@ -406,4 +425,39 @@ function findRefsInObject(obj: any): string[] {
     refs.push((obj as any).$ref);
   }
   return refs;
+}
+
+/**
+ * Check if a document is a standalone JSON Schema (not an OpenAPI document).
+ * A standalone schema has schema properties like $schema, type, properties, etc.
+ * but does NOT have the OpenAPI structure (info, paths, components.schemas).
+ */
+function isStandaloneJsonSchema(doc: any): boolean {
+  if (!doc || typeof doc !== "object") return false;
+
+  // If it has the OpenAPI structure, it's not a standalone schema
+  if (doc.openapi || doc.swagger || doc.info || doc.paths) {
+    return false;
+  }
+
+  // If it has components.schemas, it's an OpenAPI doc
+  if (doc.components?.schemas) {
+    return false;
+  }
+
+  // Check for JSON Schema indicators
+  const hasSchemaIndicators =
+    doc.type !== undefined ||
+    doc.properties !== undefined ||
+    doc.$schema !== undefined ||
+    doc.title !== undefined ||
+    doc.description !== undefined ||
+    doc.required !== undefined ||
+    doc.allOf !== undefined ||
+    doc.anyOf !== undefined ||
+    doc.oneOf !== undefined ||
+    doc.$defs !== undefined ||
+    doc.definitions !== undefined;
+
+  return hasSchemaIndicators;
 }
