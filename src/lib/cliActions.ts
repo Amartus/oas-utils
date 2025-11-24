@@ -211,7 +211,7 @@ export async function runAllOfToOneOf(
  * @param reader - Function to read input
  */
 export async function runSealSchema(
-  opts: { output?: string; useUnevaluatedProperties?: boolean },
+  opts: { output?: string; useUnevaluatedProperties?: boolean; uplift?: boolean },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -219,6 +219,7 @@ export async function runSealSchema(
 
   const sopts: SealSchemaOptions = {
     useUnevaluatedProperties: opts.useUnevaluatedProperties !== false,
+    uplift: opts.uplift,
   };
 
   const result = sealSchema(doc, sopts);

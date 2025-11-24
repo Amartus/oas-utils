@@ -1,8 +1,17 @@
-import { refToName } from "./oasUtils.js";
+import { 
+  refToName, 
+  documentSupportsUnevaluatedProperties,
+  getOpenApiVersion,
+  getJsonSchemaVersion,
+  upgradeToOas31,
+  upgradeJsonSchemaToDraft202012
+} from "./oasUtils.js";
 
 export interface SealSchemaOptions {
   /** If true, use unevaluatedProperties: false instead of additionalProperties: false (default: true) */
   useUnevaluatedProperties?: boolean;
+  /** If true, automatically upgrade OpenAPI/JSON Schema version to support unevaluatedProperties (default: false) */
+  uplift?: boolean;
 }
 
 /**
@@ -26,6 +35,53 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
 
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
   const sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
+
+  // Check if using unevaluatedProperties and validate version compatibility
+  if (useUnevaluated) {
+    const oasVersion = getOpenApiVersion(doc);
+    const schemaVersion = getJsonSchemaVersion(doc);
+    
+    // Only validate if there's an explicit version specified
+    const hasExplicitVersion = oasVersion || schemaVersion;
+    
+    if (hasExplicitVersion) {
+      const isCompatible = documentSupportsUnevaluatedProperties(doc);
+      
+      if (!isCompatible) {
+        if (opts.uplift) {
+          // Automatically upgrade the version
+          if (oasVersion) {
+            upgradeToOas31(doc);
+            console.warn(
+              `[SEAL-SCHEMA] Upgraded OpenAPI version from ${oasVersion} to 3.1.0 to support unevaluatedProperties.`
+            );
+          } else if (schemaVersion) {
+            upgradeJsonSchemaToDraft202012(doc);
+            console.warn(
+              `[SEAL-SCHEMA] Upgraded JSON Schema to draft 2020-12 to support unevaluatedProperties.`
+            );
+          }
+        } else {
+          // Error if uplift is not enabled
+          const versionInfo = oasVersion 
+            ? `OpenAPI ${oasVersion}` 
+            : `JSON Schema ${schemaVersion}`;
+          
+          throw new Error(
+            `unevaluatedProperties is only supported in OpenAPI 3.1+ or JSON Schema 2019-09+. ` +
+            `Current document uses ${versionInfo}. ` +
+            `Use --uplift option to automatically upgrade the version, or use --use-additional-properties instead.`
+          );
+        }
+      }
+    } else if (opts.uplift && isStandaloneJsonSchema(doc)) {
+      // If no version and it's a standalone schema, set it when uplift is enabled
+      upgradeJsonSchemaToDraft202012(doc);
+      console.warn(
+        `[SEAL-SCHEMA] Set JSON Schema version to draft 2020-12 to support unevaluatedProperties.`
+      );
+    }
+  }
 
   // Check if this is a standalone JSON Schema (not an OpenAPI document)
   const isStandalone = isStandaloneJsonSchema(doc);
