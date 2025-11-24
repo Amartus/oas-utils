@@ -120,7 +120,6 @@ export function getAncestors(childName: string, schemas: Record<string, any>): S
 export function getOpenApiVersion(doc: any): string | undefined {
   if (!doc || typeof doc !== "object") return undefined;
   if (typeof doc.openapi === "string") return doc.openapi;
-  if (typeof doc.swagger === "string") return doc.swagger;
   return undefined;
 }
 
@@ -229,16 +228,26 @@ export function upgradeToOas31(doc: any): any {
 }
 
 /**
- * Upgrades the JSON Schema version to draft 2020-12 to support unevaluatedProperties.
+ * Upgrades the JSON Schema version to draft 2019-09 to support unevaluatedProperties.
+ * Only upgrades if the current version is earlier than 2019-09.
  * 
  * @param doc - The JSON Schema document to upgrade
  * @returns The upgraded document
  */
-export function upgradeJsonSchemaToDraft202012(doc: any): any {
+export function upgradeJsonSchemaToDraft201909(doc: any): any {
   if (!doc || typeof doc !== "object") return doc;
   
-  // Set $schema to draft 2020-12
-  doc.$schema = "https://json-schema.org/draft/2020-12/schema";
+  const currentVersion = getJsonSchemaVersion(doc);
+  
+  // If already 2019-09 or later, keep as is
+  if (currentVersion && (currentVersion.includes("2019-09") || 
+      currentVersion.includes("2020-12") || 
+      currentVersion.includes("/next/"))) {
+    return doc;
+  }
+  
+  // Set $schema to draft 2019-09
+  doc.$schema = "https://json-schema.org/draft/2019-09/schema";
   
   return doc;
 }

@@ -4,7 +4,7 @@ import {
   getOpenApiVersion,
   getJsonSchemaVersion,
   upgradeToOas31,
-  upgradeJsonSchemaToDraft202012
+  upgradeJsonSchemaToDraft201909
 } from "./oasUtils.js";
 
 export interface SealSchemaOptions {
@@ -59,9 +59,9 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
               `[SEAL-SCHEMA] Upgraded OpenAPI version from ${oasVersion} to 3.1.0 to support unevaluatedProperties.`
             );
           } else if (schemaVersion) {
-            upgradeJsonSchemaToDraft202012(doc);
+            upgradeJsonSchemaToDraft201909(doc);
             console.warn(
-              `[SEAL-SCHEMA] Upgraded JSON Schema to draft 2020-12 to support unevaluatedProperties.`
+              `[SEAL-SCHEMA] Upgraded JSON Schema to draft 2019-09 to support unevaluatedProperties.`
             );
           }
         } else {
@@ -79,9 +79,9 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
       }
     } else if (opts.uplift && isStandalone) {
       // If no version and it's a standalone schema, set it when uplift is enabled
-      upgradeJsonSchemaToDraft202012(doc);
+      upgradeJsonSchemaToDraft201909(doc);
       console.warn(
-        `[SEAL-SCHEMA] Set JSON Schema version to draft 2020-12 to support unevaluatedProperties.`
+        `[SEAL-SCHEMA] Set JSON Schema version to draft 2019-09 to support unevaluatedProperties.`
       );
     }
   }

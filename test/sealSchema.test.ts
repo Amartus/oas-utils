@@ -891,7 +891,7 @@ describe("sealSchema", () => {
       );
     });
 
-    it("automatically upgrades JSON Schema draft-07 to 2020-12 with uplift option", () => {
+    it("automatically upgrades JSON Schema draft-07 to 2019-09 with uplift option", () => {
       const doc: any = {
         $schema: "http://json-schema.org/draft-07/schema#",
         type: "object",
@@ -902,7 +902,7 @@ describe("sealSchema", () => {
 
       const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 
-      expect(result.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(result.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
       expect(result.unevaluatedProperties).toBe(false);
     });
 
@@ -944,7 +944,7 @@ describe("sealSchema", () => {
 
       const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 
-      expect(result.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(result.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
       expect(result.unevaluatedProperties).toBe(false);
     });
 

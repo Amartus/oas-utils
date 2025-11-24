@@ -6,7 +6,7 @@ import {
   oasSupportsUnevaluatedProperties,
   documentSupportsUnevaluatedProperties,
   upgradeToOas31,
-  upgradeJsonSchemaToDraft202012,
+  upgradeJsonSchemaToDraft201909,
 } from "../src/lib/oasUtils.js";
 
 describe("Version Detection", () => {
@@ -19,11 +19,6 @@ describe("Version Detection", () => {
     it("extracts OpenAPI 3.1.0 version", () => {
       const doc = { openapi: "3.1.0" };
       expect(getOpenApiVersion(doc)).toBe("3.1.0");
-    });
-
-    it("extracts Swagger 2.0 version", () => {
-      const doc = { swagger: "2.0" };
-      expect(getOpenApiVersion(doc)).toBe("2.0");
     });
 
     it("returns undefined for non-OpenAPI document", () => {
@@ -98,10 +93,6 @@ describe("unevaluatedProperties Support Detection", () => {
       expect(oasSupportsUnevaluatedProperties("3.0.3")).toBe(false);
     });
 
-    it("returns false for Swagger 2.0", () => {
-      expect(oasSupportsUnevaluatedProperties("2.0")).toBe(false);
-    });
-
     it("returns false for empty string", () => {
       expect(oasSupportsUnevaluatedProperties("")).toBe(false);
     });
@@ -162,28 +153,52 @@ describe("Version Upgrade Functions", () => {
     });
   });
 
-  describe("upgradeJsonSchemaToDraft202012", () => {
-    it("sets $schema to draft 2020-12", () => {
+  describe("upgradeJsonSchemaToDraft201909", () => {
+    it("sets $schema to draft 2019-09", () => {
       const doc = { type: "object", properties: {} };
-      upgradeJsonSchemaToDraft202012(doc);
-      expect(doc.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      upgradeJsonSchemaToDraft201909(doc);
+      expect(doc.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
     });
 
-    it("upgrades from draft-07 to draft 2020-12", () => {
+    it("upgrades from draft-07 to draft 2019-09", () => {
       const doc = { $schema: "http://json-schema.org/draft-07/schema#", type: "object" };
-      upgradeJsonSchemaToDraft202012(doc);
-      expect(doc.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      upgradeJsonSchemaToDraft201909(doc);
+      expect(doc.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
     });
 
-    it("preserves other properties", () => {
+    it("preserves 2020-12 version", () => {
+      const doc = {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        title: "Test",
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      upgradeJsonSchemaToDraft201909(doc);
+      expect(doc.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(doc.title).toBe("Test");
+      expect(doc.type).toBe("object");
+      expect(doc.properties).toEqual({ name: { type: "string" } });
+    });
+
+    it("preserves 2019-09 version", () => {
+      const doc = {
+        $schema: "https://json-schema.org/draft/2019-09/schema",
+        title: "Test",
+        type: "object",
+      };
+      upgradeJsonSchemaToDraft201909(doc);
+      expect(doc.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
+    });
+
+    it("preserves other properties when upgrading", () => {
       const doc = {
         $schema: "http://json-schema.org/draft-07/schema#",
         title: "Test",
         type: "object",
         properties: { name: { type: "string" } },
       };
-      upgradeJsonSchemaToDraft202012(doc);
-      expect(doc.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      upgradeJsonSchemaToDraft201909(doc);
+      expect(doc.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
       expect(doc.title).toBe("Test");
       expect(doc.type).toBe("object");
       expect(doc.properties).toEqual({ name: { type: "string" } });
