@@ -239,10 +239,8 @@ export function upgradeJsonSchemaToDraft201909(doc: any): any {
   
   const currentVersion = getJsonSchemaVersion(doc);
   
-  // If already 2019-09 or later, keep as is
-  if (currentVersion && (currentVersion.includes("2019-09") || 
-      currentVersion.includes("2020-12") || 
-      currentVersion.includes("/next/"))) {
+  // If already supports unevaluatedProperties (2019-09 or later), keep as is
+  if (currentVersion && supportsUnevaluatedProperties(currentVersion)) {
     return doc;
   }
   
