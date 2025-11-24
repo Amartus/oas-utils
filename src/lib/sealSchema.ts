@@ -36,6 +36,9 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
   const sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
 
+  // Check if this is a standalone JSON Schema (not an OpenAPI document)
+  const isStandalone = isStandaloneJsonSchema(doc);
+
   // Check if using unevaluatedProperties and validate version compatibility
   if (useUnevaluated) {
     const oasVersion = getOpenApiVersion(doc);
@@ -74,7 +77,7 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
           );
         }
       }
-    } else if (opts.uplift && isStandaloneJsonSchema(doc)) {
+    } else if (opts.uplift && isStandalone) {
       // If no version and it's a standalone schema, set it when uplift is enabled
       upgradeJsonSchemaToDraft202012(doc);
       console.warn(
@@ -82,9 +85,6 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
       );
     }
   }
-
-  // Check if this is a standalone JSON Schema (not an OpenAPI document)
-  const isStandalone = isStandaloneJsonSchema(doc);
   
   let schemas: Record<string, any> | undefined;
   let wrappedName: string = "";

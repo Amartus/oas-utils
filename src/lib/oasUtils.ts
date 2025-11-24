@@ -153,14 +153,8 @@ export function supportsUnevaluatedProperties(schemaVersion: string): boolean {
     return true;
   }
   
-  // Extract draft number if using draft-XX format
-  const draftMatch = schemaVersion.match(/draft-(\d+)/);
-  if (draftMatch) {
-    const draftNum = parseInt(draftMatch[1], 10);
-    // Draft-07 and earlier don't support unevaluatedProperties
-    return false;
-  }
-  
+  // Draft-07 and earlier don't support unevaluatedProperties
+  // We explicitly return false for these versions
   return false;
 }
 
@@ -224,7 +218,7 @@ export function upgradeToOas31(doc: any): any {
   
   // Only upgrade if it's OpenAPI 3.0.x
   const currentVersion = getOpenApiVersion(doc);
-  if (!currentVersion || !currentVersion.startsWith("3.0")) {
+  if (!currentVersion || !currentVersion.match(/^3\.0\./)) {
     return doc;
   }
   
