@@ -54,7 +54,7 @@ describe("unevaluatedProperties Support Detection", () => {
       ["draft-06", "http://json-schema.org/draft-06/schema#", false],
       ["draft-04", "http://json-schema.org/draft-04/schema#", false],
       ["empty string", "", false],
-    ])("returns %s for JSON Schema %s", (_label, schemaVersion, expected) => {
+    ])("returns %s for JSON Schema %s", (label, schemaVersion, expected) => {
       expect(supportsUnevaluatedProperties(schemaVersion)).toBe(expected);
     });
   });
@@ -67,7 +67,7 @@ describe("unevaluatedProperties Support Detection", () => {
       ["3.0.0", false],
       ["3.0.3", false],
       ["empty string", false],
-    ])("returns correct value for OpenAPI %s", (version, expected) => {
+    ])("returns %s for OpenAPI %s", (version, expected) => {
       expect(oasSupportsUnevaluatedProperties(version)).toBe(expected);
     });
   });

@@ -867,7 +867,7 @@ describe("sealSchema", () => {
       it.each([
         ["draft-07", "http://json-schema.org/draft-07/schema#", "https://json-schema.org/draft/2019-09/schema"],
         ["draft-06", "http://json-schema.org/draft-06/schema#", "https://json-schema.org/draft/2019-09/schema"],
-      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (_label, fromSchema, toSchema) => {
+      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (label, fromSchema, toSchema) => {
         const doc: any = createJsonSchemaDoc(fromSchema);
 
         const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
@@ -879,7 +879,7 @@ describe("sealSchema", () => {
       it.each([
         ["2019-09", "https://json-schema.org/draft/2019-09/schema"],
         ["2020-12", "https://json-schema.org/draft/2020-12/schema"],
-      ])("does not throw error when using unevaluatedProperties with JSON Schema %s", (_label, schema) => {
+      ])("does not throw error when using unevaluatedProperties with JSON Schema %s", (label, schema) => {
         const doc: any = createJsonSchemaDoc(schema);
 
         const result = sealSchema(doc, { useUnevaluatedProperties: true });
