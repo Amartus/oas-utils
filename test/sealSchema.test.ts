@@ -816,9 +816,9 @@ describe("sealSchema", () => {
 
     describe("OpenAPI version validation", () => {
       it.each([
-        ["3.0.0"],
-        ["3.0.3"],
-      ])("throws error when using unevaluatedProperties with OpenAPI %s without uplift", (version) => {
+        { version: "3.0.0" },
+        { version: "3.0.3" },
+      ])("throws error when using unevaluatedProperties with OpenAPI $version without uplift", ({ version }) => {
         const doc: any = createOasDoc(version);
 
         expect(() => sealSchema(doc, { useUnevaluatedProperties: true })).toThrow(
@@ -827,9 +827,9 @@ describe("sealSchema", () => {
       });
 
       it.each([
-        ["3.0.0", "3.1.0"],
-        ["3.0.3", "3.1.0"],
-      ])("automatically upgrades OpenAPI %s to %s with uplift option", (fromVersion, toVersion) => {
+        { fromVersion: "3.0.0", toVersion: "3.1.0" },
+        { fromVersion: "3.0.3", toVersion: "3.1.0" },
+      ])("automatically upgrades OpenAPI $fromVersion to $toVersion with uplift option", ({ fromVersion, toVersion }) => {
         const doc: any = createOasDoc(fromVersion);
 
         sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
@@ -865,9 +865,9 @@ describe("sealSchema", () => {
       });
 
       it.each([
-        ["draft-07", "http://json-schema.org/draft-07/schema#"],
-        ["draft-06", "http://json-schema.org/draft-06/schema#"],
-      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (label, fromSchema) => {
+        { label: "draft-07", fromSchema: "http://json-schema.org/draft-07/schema#" },
+        { label: "draft-06", fromSchema: "http://json-schema.org/draft-06/schema#" },
+      ])("automatically upgrades JSON Schema $label to 2019-09 with uplift option", ({ label, fromSchema }) => {
         const doc: any = createJsonSchemaDoc(fromSchema);
 
         const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
@@ -877,9 +877,9 @@ describe("sealSchema", () => {
       });
 
       it.each([
-        ["2019-09", "https://json-schema.org/draft/2019-09/schema"],
-        ["2020-12", "https://json-schema.org/draft/2020-12/schema"],
-      ])("does not throw error when using unevaluatedProperties with JSON Schema %s", (label, schema) => {
+        { label: "2019-09", schema: "https://json-schema.org/draft/2019-09/schema" },
+        { label: "2020-12", schema: "https://json-schema.org/draft/2020-12/schema" },
+      ])("does not throw error when using unevaluatedProperties with JSON Schema $label", ({ label, schema }) => {
         const doc: any = createJsonSchemaDoc(schema);
 
         const result = sealSchema(doc, { useUnevaluatedProperties: true });
