@@ -47,54 +47,28 @@ describe("Version Detection", () => {
 
 describe("unevaluatedProperties Support Detection", () => {
   describe("supportsUnevaluatedProperties (JSON Schema)", () => {
-    it("returns true for JSON Schema 2019-09", () => {
-      expect(supportsUnevaluatedProperties("https://json-schema.org/draft/2019-09/schema")).toBe(true);
-    });
-
-    it("returns true for JSON Schema 2020-12", () => {
-      expect(supportsUnevaluatedProperties("https://json-schema.org/draft/2020-12/schema")).toBe(true);
-    });
-
-    it("returns false for JSON Schema draft-07", () => {
-      expect(supportsUnevaluatedProperties("http://json-schema.org/draft-07/schema#")).toBe(false);
-    });
-
-    it("returns false for JSON Schema draft-06", () => {
-      expect(supportsUnevaluatedProperties("http://json-schema.org/draft-06/schema#")).toBe(false);
-    });
-
-    it("returns false for JSON Schema draft-04", () => {
-      expect(supportsUnevaluatedProperties("http://json-schema.org/draft-04/schema#")).toBe(false);
-    });
-
-    it("returns false for empty string", () => {
-      expect(supportsUnevaluatedProperties("")).toBe(false);
+    it.each([
+      ["2019-09", "https://json-schema.org/draft/2019-09/schema", true],
+      ["2020-12", "https://json-schema.org/draft/2020-12/schema", true],
+      ["draft-07", "http://json-schema.org/draft-07/schema#", false],
+      ["draft-06", "http://json-schema.org/draft-06/schema#", false],
+      ["draft-04", "http://json-schema.org/draft-04/schema#", false],
+      ["empty string", "", false],
+    ])("returns %s for JSON Schema %s", (_label, schemaVersion, expected) => {
+      expect(supportsUnevaluatedProperties(schemaVersion)).toBe(expected);
     });
   });
 
   describe("oasSupportsUnevaluatedProperties (OpenAPI)", () => {
-    it("returns true for OpenAPI 3.1.0", () => {
-      expect(oasSupportsUnevaluatedProperties("3.1.0")).toBe(true);
-    });
-
-    it("returns true for OpenAPI 3.1.1", () => {
-      expect(oasSupportsUnevaluatedProperties("3.1.1")).toBe(true);
-    });
-
-    it("returns true for OpenAPI 3.2.0 (future version)", () => {
-      expect(oasSupportsUnevaluatedProperties("3.2.0")).toBe(true);
-    });
-
-    it("returns false for OpenAPI 3.0.0", () => {
-      expect(oasSupportsUnevaluatedProperties("3.0.0")).toBe(false);
-    });
-
-    it("returns false for OpenAPI 3.0.3", () => {
-      expect(oasSupportsUnevaluatedProperties("3.0.3")).toBe(false);
-    });
-
-    it("returns false for empty string", () => {
-      expect(oasSupportsUnevaluatedProperties("")).toBe(false);
+    it.each([
+      ["3.1.0", true],
+      ["3.1.1", true],
+      ["3.2.0 (future version)", true],
+      ["3.0.0", false],
+      ["3.0.3", false],
+      ["empty string", false],
+    ])("returns correct value for OpenAPI %s", (version, expected) => {
+      expect(oasSupportsUnevaluatedProperties(version)).toBe(expected);
     });
   });
 

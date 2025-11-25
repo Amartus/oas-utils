@@ -788,137 +788,105 @@ describe("sealSchema", () => {
   });
 
   describe("version validation and uplift", () => {
-    it("throws error when using unevaluatedProperties with OpenAPI 3.0.0 without uplift", () => {
-      const doc: any = {
-        openapi: "3.0.0",
-        info: { title: "Test", version: "1.0.0" },
-        paths: {},
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
+    // Helper to create OpenAPI doc
+    const createOasDoc = (version: string) => ({
+      openapi: version,
+      info: { title: "Test", version: "1.0.0" },
+      paths: {},
+      components: {
+        schemas: {
+          Pet: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
             },
           },
         },
-      };
-
-      expect(() => sealSchema(doc, { useUnevaluatedProperties: true })).toThrow(
-        /unevaluatedProperties is only supported in OpenAPI 3.1\+ or JSON Schema 2019-09\+/
-      );
+      },
     });
 
-    it("automatically upgrades OpenAPI 3.0.0 to 3.1.0 with uplift option", () => {
-      const doc: any = {
-        openapi: "3.0.0",
-        info: { title: "Test", version: "1.0.0" },
-        paths: {},
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
-            },
-          },
-        },
-      };
-
-      sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
-
-      expect(doc.openapi).toBe("3.1.0");
-      expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+    // Helper to create JSON Schema doc
+    const createJsonSchemaDoc = (schema: string) => ({
+      $schema: schema,
+      type: "object" as const,
+      properties: {
+        name: { type: "string" as const },
+      },
     });
 
-    it("does not throw error when using additionalProperties with OpenAPI 3.0.0", () => {
-      const doc: any = {
-        openapi: "3.0.0",
-        info: { title: "Test", version: "1.0.0" },
-        paths: {},
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
-            },
-          },
-        },
-      };
+    describe("OpenAPI version validation", () => {
+      it.each([
+        ["3.0.0"],
+        ["3.0.3"],
+      ])("throws error when using unevaluatedProperties with OpenAPI %s without uplift", (version) => {
+        const doc: any = createOasDoc(version);
 
-      expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).not.toThrow();
-      expect(doc.components.schemas.Pet.additionalProperties).toBe(false);
+        expect(() => sealSchema(doc, { useUnevaluatedProperties: true })).toThrow(
+          /unevaluatedProperties is only supported in OpenAPI 3.1\+ or JSON Schema 2019-09\+/
+        );
+      });
+
+      it.each([
+        ["3.0.0", "3.1.0"],
+        ["3.0.3", "3.1.0"],
+      ])("automatically upgrades OpenAPI %s to %s with uplift option", (fromVersion, toVersion) => {
+        const doc: any = createOasDoc(fromVersion);
+
+        sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
+
+        expect(doc.openapi).toBe(toVersion);
+        expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+      });
+
+      it("does not throw error when using additionalProperties with OpenAPI 3.0.0", () => {
+        const doc: any = createOasDoc("3.0.0");
+
+        expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).not.toThrow();
+        expect(doc.components.schemas.Pet.additionalProperties).toBe(false);
+      });
+
+      it("does not modify OpenAPI 3.1.0 when using unevaluatedProperties", () => {
+        const doc: any = createOasDoc("3.1.0");
+
+        sealSchema(doc, { useUnevaluatedProperties: true });
+
+        expect(doc.openapi).toBe("3.1.0");
+        expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+      });
     });
 
-    it("does not modify OpenAPI 3.1.0 when using unevaluatedProperties", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        info: { title: "Test", version: "1.0.0" },
-        paths: {},
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-              },
-            },
-          },
-        },
-      };
+    describe("JSON Schema version validation", () => {
+      it("throws error when using unevaluatedProperties with JSON Schema draft-07 without uplift", () => {
+        const doc: any = createJsonSchemaDoc("http://json-schema.org/draft-07/schema#");
 
-      sealSchema(doc, { useUnevaluatedProperties: true });
+        expect(() => sealSchema(doc, { useUnevaluatedProperties: true })).toThrow(
+          /unevaluatedProperties is only supported in OpenAPI 3.1\+ or JSON Schema 2019-09\+/
+        );
+      });
 
-      expect(doc.openapi).toBe("3.1.0");
-      expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
-    });
+      it.each([
+        ["draft-07", "http://json-schema.org/draft-07/schema#", "https://json-schema.org/draft/2019-09/schema"],
+        ["draft-06", "http://json-schema.org/draft-06/schema#", "https://json-schema.org/draft/2019-09/schema"],
+      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (_label, fromSchema, toSchema) => {
+        const doc: any = createJsonSchemaDoc(fromSchema);
 
-    it("throws error when using unevaluatedProperties with JSON Schema draft-07 without uplift", () => {
-      const doc: any = {
-        $schema: "http://json-schema.org/draft-07/schema#",
-        type: "object",
-        properties: {
-          name: { type: "string" },
-        },
-      };
+        const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 
-      expect(() => sealSchema(doc, { useUnevaluatedProperties: true })).toThrow(
-        /unevaluatedProperties is only supported in OpenAPI 3.1\+ or JSON Schema 2019-09\+/
-      );
-    });
+        expect(result.$schema).toBe(toSchema);
+        expect(result.unevaluatedProperties).toBe(false);
+      });
 
-    it("automatically upgrades JSON Schema draft-07 to 2019-09 with uplift option", () => {
-      const doc: any = {
-        $schema: "http://json-schema.org/draft-07/schema#",
-        type: "object",
-        properties: {
-          name: { type: "string" },
-        },
-      };
+      it.each([
+        ["2019-09", "https://json-schema.org/draft/2019-09/schema"],
+        ["2020-12", "https://json-schema.org/draft/2020-12/schema"],
+      ])("does not throw error when using unevaluatedProperties with JSON Schema %s", (_label, schema) => {
+        const doc: any = createJsonSchemaDoc(schema);
 
-      const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
+        const result = sealSchema(doc, { useUnevaluatedProperties: true });
 
-      expect(result.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
-      expect(result.unevaluatedProperties).toBe(false);
-    });
-
-    it("does not throw error when using unevaluatedProperties with JSON Schema 2020-12", () => {
-      const doc: any = {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "object",
-        properties: {
-          name: { type: "string" },
-        },
-      };
-
-      const result = sealSchema(doc, { useUnevaluatedProperties: true });
-
-      expect(result.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
-      expect(result.unevaluatedProperties).toBe(false);
+        expect(result.$schema).toBe(schema);
+        expect(result.unevaluatedProperties).toBe(false);
+      });
     });
 
     it("does not throw for document without version by default (backward compatibility)", () => {
