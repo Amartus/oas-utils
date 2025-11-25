@@ -48,26 +48,26 @@ describe("Version Detection", () => {
 describe("unevaluatedProperties Support Detection", () => {
   describe("supportsUnevaluatedProperties (JSON Schema)", () => {
     it.each([
-      ["2019-09", "https://json-schema.org/draft/2019-09/schema", true],
-      ["2020-12", "https://json-schema.org/draft/2020-12/schema", true],
-      ["draft-07", "http://json-schema.org/draft-07/schema#", false],
-      ["draft-06", "http://json-schema.org/draft-06/schema#", false],
-      ["draft-04", "http://json-schema.org/draft-04/schema#", false],
-      ["empty string", "", false],
-    ])("returns %s for JSON Schema %s", (label, schemaVersion, expected) => {
+      { label: "2019-09", schemaVersion: "https://json-schema.org/draft/2019-09/schema", expected: true },
+      { label: "2020-12", schemaVersion: "https://json-schema.org/draft/2020-12/schema", expected: true },
+      { label: "draft-07", schemaVersion: "http://json-schema.org/draft-07/schema#", expected: false },
+      { label: "draft-06", schemaVersion: "http://json-schema.org/draft-06/schema#", expected: false },
+      { label: "draft-04", schemaVersion: "http://json-schema.org/draft-04/schema#", expected: false },
+      { label: "empty string", schemaVersion: "", expected: false },
+    ])("returns $expected for JSON Schema $label", ({ label, schemaVersion, expected }) => {
       expect(supportsUnevaluatedProperties(schemaVersion)).toBe(expected);
     });
   });
 
   describe("oasSupportsUnevaluatedProperties (OpenAPI)", () => {
     it.each([
-      ["3.1.0", true],
-      ["3.1.1", true],
-      ["3.2.0 (future version)", true],
-      ["3.0.0", false],
-      ["3.0.3", false],
-      ["empty string", false],
-    ])("returns %s for OpenAPI %s", (version, expected) => {
+      { version: "3.1.0", expected: true },
+      { version: "3.1.1", expected: true },
+      { version: "3.2.0 (future version)", expected: true },
+      { version: "3.0.0", expected: false },
+      { version: "3.0.3", expected: false },
+      { version: "empty string", expected: false },
+    ])("returns $expected for OpenAPI $version", ({ version, expected }) => {
       expect(oasSupportsUnevaluatedProperties(version)).toBe(expected);
     });
   });
