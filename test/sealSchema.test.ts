@@ -808,9 +808,9 @@ describe("sealSchema", () => {
     // Helper to create JSON Schema doc
     const createJsonSchemaDoc = (schema: string) => ({
       $schema: schema,
-      type: "object" as const,
+      type: "object",
       properties: {
-        name: { type: "string" as const },
+        name: { type: "string" },
       },
     });
 

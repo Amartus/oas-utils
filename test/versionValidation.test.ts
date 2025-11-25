@@ -61,13 +61,13 @@ describe("unevaluatedProperties Support Detection", () => {
 
   describe("oasSupportsUnevaluatedProperties (OpenAPI)", () => {
     it.each([
-      { version: "3.1.0", expected: true, description: "" },
-      { version: "3.1.1", expected: true, description: "" },
-      { version: "3.2.0", expected: true, description: "(future version)" },
-      { version: "3.0.0", expected: false, description: "" },
-      { version: "3.0.3", expected: false, description: "" },
-      { version: "", expected: false, description: "(empty string)" },
-    ])("returns $expected for OpenAPI '$version' $description", ({ version, expected, description }) => {
+      { version: "3.1.0", expected: true },
+      { version: "3.1.1", expected: true },
+      { version: "3.2.0", expected: true },
+      { version: "3.0.0", expected: false },
+      { version: "3.0.3", expected: false },
+      { version: "", expected: false },
+    ])("returns $expected for OpenAPI '$version'", ({ version, expected }) => {
       expect(oasSupportsUnevaluatedProperties(version)).toBe(expected);
     });
   });
