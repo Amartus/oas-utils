@@ -865,14 +865,14 @@ describe("sealSchema", () => {
       });
 
       it.each([
-        ["draft-07", "http://json-schema.org/draft-07/schema#", "https://json-schema.org/draft/2019-09/schema"],
-        ["draft-06", "http://json-schema.org/draft-06/schema#", "https://json-schema.org/draft/2019-09/schema"],
-      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (label, fromSchema, toSchema) => {
+        ["draft-07", "http://json-schema.org/draft-07/schema#"],
+        ["draft-06", "http://json-schema.org/draft-06/schema#"],
+      ])("automatically upgrades JSON Schema %s to 2019-09 with uplift option", (label, fromSchema) => {
         const doc: any = createJsonSchemaDoc(fromSchema);
 
         const result = sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 
-        expect(result.$schema).toBe(toSchema);
+        expect(result.$schema).toBe("https://json-schema.org/draft/2019-09/schema");
         expect(result.unevaluatedProperties).toBe(false);
       });
 
