@@ -5,6 +5,15 @@
 
 import { refToName } from "./oasUtils.js";
 
+// Dynamically require JSONPath to avoid top-level dependency changes in environments
+let JSONPath: any | undefined = undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  JSONPath = require("jsonpath-plus").JSONPath;
+} catch (e) {
+  JSONPath = undefined;
+}
+
 /**
  * Callback for schema transformation during traversal.
  * Return true if schema was modified.
@@ -221,17 +230,32 @@ export function getSchemaReferencers(schemas: Record<string, any>, targetName: s
   for (const [schemaName, schema] of Object.entries(schemas)) {
     if (!schema || typeof schema !== "object") continue;
 
-    const hasRef = collectMatching(schema, (node: any) => {
-      return (
-        node &&
-        typeof node === "object" &&
-        ((node as any).$ref === targetRef || (Array.isArray(node) && node.some((item: any) => item?.$ref === targetRef)))
-      );
-    }).length > 0;
+    let hasRef = false;
 
-    if (hasRef) {
-      referencers.add(schemaName);
+    if (JSONPath) {
+      try {
+        // Query all $ref values under this schema and check for the targetRef
+        const path = `$.components.schemas.${schemaName}..$ref`;
+        const refs = JSONPath({ path, json: { components: { schemas } }, resultType: "value" }) as any[];
+        hasRef = Array.isArray(refs) && refs.includes(targetRef);
+      } catch (e) {
+        hasRef = false;
+      }
     }
+
+    if (!hasRef) {
+      // Fallback to original traversal-based detection
+      const found = collectMatching(schema, (node: any) => {
+        return (
+          node &&
+          typeof node === "object" &&
+          ((node as any).$ref === targetRef || (Array.isArray(node) && node.some((item: any) => item?.$ref === targetRef)))
+        );
+      }).length > 0;
+      hasRef = found;
+    }
+
+    if (hasRef) referencers.add(schemaName);
   }
 
   return referencers;

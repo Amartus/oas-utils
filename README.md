@@ -150,6 +150,10 @@ Options:
 - --use-additional-properties: use `additionalProperties: false` instead.
 - --uplift: automatically upgrade OpenAPI version to 3.1.0 or JSON Schema to draft 2020-12 to support `unevaluatedProperties`.
 
+Compatibility notes:
+- When sealing against OpenAPI 3.0.x or JSON Schema draft-07, the CLI now detects `allOf` references and raises an error if `--use-additional-properties` is requested (because `additionalProperties:false` cannot cover compositions reliably). Use `--use-unevaluated-properties` together with `--uplift`, or manually upgrade the document, to avoid the error.
+- The tool relies on `jsonpath-plus` for these checks, so users can expect faster detection of `allOf` + `$ref` patterns that trigger compatibility constraints.
+
 **Note**: `unevaluatedProperties` is only supported in OpenAPI 3.1+ or JSON Schema 2019-09+. If your document uses an earlier version and you want to use `unevaluatedProperties`, either:
 - Use the `--uplift` option to automatically upgrade the version
 - Manually upgrade your document to a compatible version

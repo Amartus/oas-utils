@@ -7,6 +7,9 @@ import {
   upgradeJsonSchemaToDraft201909
 } from "./oasUtils.js";
 
+import { JSONPath } from "jsonpath-plus";
+import { extractDefRefName } from "./jsonSchemaUtils";
+
 export interface SealSchemaOptions {
   /** If true, use unevaluatedProperties: false instead of additionalProperties: false (default: true) */
   useUnevaluatedProperties?: boolean;
@@ -85,6 +88,56 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
       );
     }
   }
+
+  // Additional check: when using `additionalProperties:false` (i.e. not using
+  // unevaluatedProperties) we must ensure that sealing will actually cover
+  // composed schemas. In OpenAPI 3.0 and JSON Schema drafts before 2019-09,
+  // `additionalProperties: false` does NOT apply across `allOf` composition in
+  // a way that reliably seals extended models. If the document contains any
+  // schema using `allOf` compositions referencing other schemas, sealing with
+  // `additionalProperties:false` may be ineffective. In that case we should
+  // throw an error unless `useUnevaluatedProperties` is true or `uplift` is set
+  // (to upgrade the document to a version that supports `unevaluatedProperties`).
+  if (!useUnevaluated) {
+    validateAdditionalPropertiesCompatibility(doc);
+  }
+
+
+/**
+ * Determine whether the provided document contains any schemas that use
+ * `allOf` referencing other schemas (simple $ref in allOf entries).
+ */
+function documentContainsAllOfRefs(doc: any): boolean {
+  // Use JSONPath to find any allOf entries that contain a $ref anywhere in the document
+  try {
+    const matches = JSONPath({ path: "$..allOf[*].$ref", json: doc });
+    return Array.isArray(matches) && matches.length > 0;
+  } catch (e) {
+    // If JSONPath fails for some reason, fall back to conservative false
+    return false;
+  }
+}
+
+
+/**
+ * Validate that attempting to seal using `additionalProperties:false` is
+ * compatible with the document's declared OpenAPI/JSON Schema version. Throw
+ * a descriptive error when an explicit older version is present and the
+ * document contains allOf references that would make sealing ineffective.
+ */
+function validateAdditionalPropertiesCompatibility(doc: any): void {
+  const oasVersion = getOpenApiVersion(doc);
+  const schemaVersion = getJsonSchemaVersion(doc);
+  const hasExplicitVersion = oasVersion || schemaVersion;
+
+  if (hasExplicitVersion && documentContainsAllOfRefs(doc)) {
+    const versionInfo = oasVersion ? `OpenAPI ${oasVersion}` : `JSON Schema ${schemaVersion}`;
+    throw new Error(
+      `Sealing via additionalProperties:false cannot reliably cover schemas composed with allOf in ${versionInfo}. ` +
+      `Use --use-unevaluated-properties or enable --uplift to upgrade the document to a version that supports unevaluatedProperties.`
+    );
+  }
+}
   
   let schemas: Record<string, any> | undefined;
   let wrappedName: string = "";
@@ -325,29 +378,29 @@ function updateNestedAllOfReferences(
   const originalRef = `${refPrefix}/${originalName}`;
   const coreRef = `${refPrefix}/${coreName}`;
 
-  for (const def of Object.values(defs)) {
-    if (!def || typeof def !== "object") continue;
-    if (!Array.isArray((def as any).allOf)) continue;
+  // Use JSONPath to find all matching allOf entries with the originalRef and update them
+  try {
+    const query = `$.${defsKey}..allOf[?(@.$ref=='${originalRef}')]`;
+    const pointers: string[] = JSONPath({ path: query, json: { [defsKey]: defs }, resultType: 'pointer' }) as string[];
+    for (const ptr of pointers) {
+      // pointer points to the matching allOf item; we need to set its $ref to coreRef
+      setJsonPointer({ [defsKey]: defs }, ptr + '/$ref', coreRef);
+    }
+  } catch (e) {
+    // Fallback to original loop if JSONPath fails
+    for (const def of Object.values(defs)) {
+      if (!def || typeof def !== "object") continue;
+      if (!Array.isArray((def as any).allOf)) continue;
 
-    for (const item of (def as any).allOf) {
-      if (item && typeof item === "object" && (item as any).$ref === originalRef) {
-        (item as any).$ref = coreRef;
+      for (const item of (def as any).allOf) {
+        if (item && typeof item === "object" && (item as any).$ref === originalRef) {
+          (item as any).$ref = coreRef;
+        }
       }
     }
   }
 }
 
-/**
- * Extract the schema name from a $defs or definitions reference
- * (e.g., "#/$defs/Employee" or "#/definitions/Employee" -> "Employee")
- */
-function extractDefRefName(ref: string): string {
-  const defsMatch = ref.match(/#\/\$defs\/([^/]+)$/);
-  if (defsMatch) return defsMatch[1];
-  const defsMatch2 = ref.match(/#\/definitions\/([^/]+)$/);
-  if (defsMatch2) return defsMatch2[1];
-  return "";
-}
 
 /**
  * Update all allOf references from original schema to core schema.
@@ -360,16 +413,48 @@ function updateAllOfReferences(
   const originalRef = `#/components/schemas/${originalName}`;
   const coreRef = `#/components/schemas/${coreName}`;
 
-  for (const schema of Object.values(schemas)) {
-    if (!schema || typeof schema !== "object") continue;
-    if (!Array.isArray((schema as any).allOf)) continue;
+  try {
+    const query = `$.components.schemas..allOf[?(@.$ref=='${originalRef}')]`;
+    const pointers: string[] = JSONPath({ path: query, json: { components: { schemas } }, resultType: 'pointer' }) as string[];
+    for (const ptr of pointers) {
+      setJsonPointer({ components: { schemas } }, ptr + '/$ref', coreRef);
+    }
+  } catch (e) {
+    // Fallback to original loop
+    for (const schema of Object.values(schemas)) {
+      if (!schema || typeof schema !== "object") continue;
+      if (!Array.isArray((schema as any).allOf)) continue;
 
-    for (const item of (schema as any).allOf) {
-      if (item && typeof item === "object" && (item as any).$ref === originalRef) {
-        (item as any).$ref = coreRef;
+      for (const item of (schema as any).allOf) {
+        if (item && typeof item === "object" && (item as any).$ref === originalRef) {
+          (item as any).$ref = coreRef;
+        }
       }
     }
   }
+}
+
+
+/**
+ * Set a value in an object using a JSON Pointer string (e.g. '/a/0/b').
+ */
+function setJsonPointer(root: any, pointer: string, value: any): void {
+  if (!pointer || pointer === "") return;
+  // pointer is returned from jsonpath-plus as a JSON Pointer starting with '/'
+  const parts = pointer.split('/').slice(1).map(unescapePointer);
+  let cur = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!(key in cur)) return; // unexpected shape
+    cur = cur[key];
+    if (cur === undefined || cur === null) return;
+  }
+  const last = parts[parts.length - 1];
+  cur[last] = value;
+}
+
+function unescapePointer(part: string): string {
+  return part.replace(/~1/g, '/').replace(/~0/g, '~');
 }
 
 /**

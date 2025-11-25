@@ -1,3 +1,5 @@
+import { JSONPath } from 'jsonpath-plus';
+
 // Common OpenAPI schema utilities
 
 /**
@@ -25,23 +27,28 @@ export function buildInheritanceGraph(schemas: Record<string, any>): Map<string,
     return graph;
   }
 
-  // Iterate through all schemas
   for (const [childName, schema] of Object.entries(schemas)) {
     if (!schema || typeof schema !== "object") continue;
 
-    // Look for allOf references in this schema
-    if (Array.isArray(schema.allOf)) {
-      for (const item of schema.allOf) {
-        if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
-          const parentName = refToName((item as any).$ref);
-          if (parentName) {
-            // Add this child to the parent's set
-            if (!graph.has(parentName)) {
-              graph.set(parentName, new Set());
-            }
-            graph.get(parentName)!.add(childName);
-          }
-        }
+    const path = `$.components.schemas.${childName}.allOf[*].$ref`;
+    let refs: any[] | undefined;
+    try {
+      refs = JSONPath({ path, json: { components: { schemas } }, resultType: 'value' }) as any[];
+    } catch (_e) {
+      refs = undefined;
+    }
+
+    if (!Array.isArray(refs)) {
+      refs = Array.isArray((schema as any).allOf)
+        ? (schema as any).allOf.map((item: any) => (item && typeof item === 'object' && typeof item.$ref === 'string' ? item.$ref : undefined)).filter(Boolean)
+        : [];
+    }
+
+    for (const ref of refs || []) {
+      const parentName = refToName(ref as string);
+      if (parentName) {
+        if (!graph.has(parentName)) graph.set(parentName, new Set());
+        graph.get(parentName)!.add(childName);
       }
     }
   }

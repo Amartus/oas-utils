@@ -853,6 +853,29 @@ describe("sealSchema", () => {
         expect(doc.openapi).toBe("3.1.0");
         expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
       });
+
+      it("throws error when using additionalProperties with OpenAPI 3.0 and allOf refs", () => {
+        const doc: any = {
+          openapi: "3.0.0",
+          info: { title: "Test", version: "1.0.0" },
+          paths: {},
+          components: {
+            schemas: {
+              Base: {
+                type: "object",
+                properties: { id: { type: "string" } },
+              },
+              Extended: {
+                allOf: [{ $ref: "#/components/schemas/Base" }],
+              },
+            },
+          },
+        };
+
+        expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).toThrow(
+          /cannot reliably cover schemas composed with allOf/
+        );
+      });
     });
 
     describe("JSON Schema version validation", () => {
@@ -886,6 +909,21 @@ describe("sealSchema", () => {
 
         expect(result.$schema).toBe(schema);
         expect(result.unevaluatedProperties).toBe(false);
+      });
+
+      it("throws error when using additionalProperties with draft-07 and allOf refs", () => {
+        const doc: any = {
+          $schema: "http://json-schema.org/draft-07/schema#",
+          type: "object",
+          $defs: {
+            Base: { type: "object", properties: { id: { type: "string" } } },
+            Extended: { allOf: [{ $ref: "#/$defs/Base" }] },
+          },
+        };
+
+        expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).toThrow(
+          /cannot reliably cover schemas composed with allOf/
+        );
       });
     });
 

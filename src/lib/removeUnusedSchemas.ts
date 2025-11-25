@@ -13,6 +13,7 @@ export interface RemoveOptions {
 
 
 import { refToName } from './oasUtils.js';
+import { JSONPath } from 'jsonpath-plus';
 
 /**
  * Remove unused components.schemas from an OpenAPI document (for CLI command).
@@ -42,42 +43,47 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) return node.forEach(visitCollectFromPaths);
     if (typeof (node as any).$ref === "string") {
-      const refStr = (node as any).$ref as string;
-      const n = refToName(refStr);
-      if (n && !used.has(n)) {
-        used.add(n);
-        queue.push(n);
-      } else {
-        // Resolve other components references like #/components/requestBodies/Name
-        const m = refStr.match(/^#\/components\/([^\/]+)\/([^#\/]+)$/);
-        if (m) {
-          const section = m[1];
-          const name = decodeURIComponent(m[2]);
-          const key = section + ":" + name;
-          if (!visitedComponents.has(key)) {
-            visitedComponents.add(key);
-            markUsedComponent(section, name);
-            const target = doc?.components?.[section]?.[name];
-            if (target) visitCollectFromPaths(target);
-          }
-        }
-      }
+      handlePathReference((node as any).$ref);
     }
     for (const k of Object.keys(node)) visitCollectFromPaths((node as any)[k]);
   };
 
-  if (doc.paths) visitCollectFromPaths(doc.paths);
+  const handlePathReference = (refStr: string) => {
+    const n = refToName(refStr);
+    if (n && !used.has(n)) {
+      used.add(n);
+      queue.push(n);
+      return;
+    }
+    const m = refStr.match(/^#\/components\/([^\/]+)\/([^#\/]+)$/);
+    if (!m) return;
+    const section = m[1];
+    const name = decodeURIComponent(m[2]);
+    const key = section + ":" + name;
+    if (visitedComponents.has(key)) return;
+    visitedComponents.add(key);
+    markUsedComponent(section, name);
+    const target = doc?.components?.[section]?.[name];
+    if (target) visitCollectFromPaths(target);
+  };
+
+  if (doc.paths) {
+    const collectedRefs = JSONPath({ path: "$..$ref", json: doc.paths, resultType: "value" }) as string[];
+    for (const refStr of collectedRefs ?? []) {
+      handlePathReference(refStr);
+    }
+  }
 
   // 2) Follow transitive references among schemas (downward closure via $ref in schema bodies)
 
   const collectRefsInSchema = (schema: any, add: (name: string) => void) => {
     if (!schema || typeof schema !== "object") return;
-    if (Array.isArray(schema)) return schema.forEach((x) => collectRefsInSchema(x, add));
-    if (typeof (schema as any).$ref === "string") {
-      const maybe = refToName((schema as any).$ref);
+    const refs = JSONPath({ path: "$..$ref", json: schema, resultType: "value" }) as string[];
+    if (!Array.isArray(refs)) return;
+    for (const refStr of refs) {
+      const maybe = refToName(refStr);
       if (maybe) add(maybe);
     }
-    for (const k of Object.keys(schema)) collectRefsInSchema((schema as any)[k], add);
   };
 
   while (queue.length) {

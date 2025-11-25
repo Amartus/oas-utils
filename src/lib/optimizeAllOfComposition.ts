@@ -1,5 +1,14 @@
 import { refToName } from "./oasUtils.js";
 
+// Dynamically require JSONPath for optional, per-schema value queries
+let JSONPath: any | undefined = undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  JSONPath = require("jsonpath-plus").JSONPath;
+} catch (e) {
+  JSONPath = undefined;
+}
+
 /**
  * Optimize allOf composition globally across an OpenAPI document.
  *
@@ -23,12 +32,32 @@ export function optimizeAllOfComposition(doc: any): any {
     if (directAllOf.has(name)) return directAllOf.get(name)!;
     const bases = new Set<string>();
     const schema = schemas[name];
-    const allOf = schema?.allOf;
-    if (Array.isArray(allOf)) {
-      for (const part of allOf) {
-        if (part && typeof part === "object" && typeof (part as any).$ref === "string") {
-          const base = refToName((part as any).$ref);
-          if (base) bases.add(base);
+    // Try JSONPath per-schema to get allOf $ref values
+    if (JSONPath) {
+      try {
+        const path = `$.components.schemas.${name}.allOf[*].$ref`;
+        const refs = JSONPath({ path, json: { components: { schemas } }, resultType: "value" }) as any[];
+        if (Array.isArray(refs)) {
+          for (const r of refs) {
+            if (typeof r === "string") {
+              const base = refToName(r);
+              if (base) bases.add(base);
+            }
+          }
+        }
+      } catch (e) {
+        // fall back to manual traversal below
+      }
+    }
+
+    if (bases.size === 0 && schema) {
+      const allOf = schema?.allOf;
+      if (Array.isArray(allOf)) {
+        for (const part of allOf) {
+          if (part && typeof part === "object" && typeof (part as any).$ref === "string") {
+            const base = refToName((part as any).$ref);
+            if (base) bases.add(base);
+          }
         }
       }
     }
