@@ -153,15 +153,20 @@ program
     "Use additionalProperties: false instead of unevaluatedProperties: false",
     false
   )
+  .option(
+    "--uplift",
+    "Automatically upgrade OpenAPI/JSON Schema version to support unevaluatedProperties",
+    false
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; useUnevaluatedProperties?: boolean; useAdditionalProperties?: boolean }
+      opts: { output?: string; useUnevaluatedProperties?: boolean; useAdditionalProperties?: boolean; uplift?: boolean }
     ) => {
       try {
         const useUnevaluated = !opts.useAdditionalProperties;
         await runSealSchema(
-          { output: opts.output, useUnevaluatedProperties: useUnevaluated },
+          { output: opts.output, useUnevaluatedProperties: useUnevaluated, uplift: opts.uplift },
           format,
           () => reader(input)
         );

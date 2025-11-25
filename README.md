@@ -140,12 +140,20 @@ oas-utils seal-schema <input.yaml> -o output.yaml
 oas-utils seal-schema <input.yaml> -o output.yaml --use-unevaluated-properties
 # Use additionalProperties: false instead
 oas-utils seal-schema <input.yaml> -o output.yaml --use-additional-properties
+# Automatically upgrade OpenAPI 3.0.x to 3.1.0 or JSON Schema to draft 2020-12
+oas-utils seal-schema <input.yaml> -o output.yaml --uplift
 ```
 
 Options:
 - -o, --output: write result to this file (defaults to stdout).
 - --use-unevaluated-properties: use `unevaluatedProperties: false` (default, better for JSON Schema 2019-09+).
 - --use-additional-properties: use `additionalProperties: false` instead.
+- --uplift: automatically upgrade OpenAPI version to 3.1.0 or JSON Schema to draft 2020-12 to support `unevaluatedProperties`.
+
+**Note**: `unevaluatedProperties` is only supported in OpenAPI 3.1+ or JSON Schema 2019-09+. If your document uses an earlier version and you want to use `unevaluatedProperties`, either:
+- Use the `--uplift` option to automatically upgrade the version
+- Manually upgrade your document to a compatible version
+- Use `--use-additional-properties` instead
 
 Example transformation:
 - Original `Animal` schema (object-like, referenced in `allOf` by `Cat`)
@@ -193,6 +201,7 @@ decorators:
   # Seal object schemas
   oas-utils/seal-schema:
     useUnevaluatedProperties: true
+    uplift: false  # Set to true to automatically upgrade OpenAPI/JSON Schema version
 ```
 
 3) Run bundling with Redocly CLI and the decorators will apply the transformations. With `aggressive: true`, unused non-schema components (responses, headers, requestBodies, etc.) are removed as well.
@@ -216,7 +225,7 @@ const result = cleanupDiscriminatorMappings(doc);
 console.log(`Removed ${result.mappingsRemoved} invalid mappings from ${result.schemasChecked} schemas`);
 
 // Seal object schemas
-sealSchema(doc, { useUnevaluatedProperties: true });
+sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 ```
 
 ## Notes
