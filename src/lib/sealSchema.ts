@@ -37,10 +37,13 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
   if (!doc || typeof doc !== "object") return doc;
 
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
-  const sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
+  let sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
 
   // Check if this is a standalone JSON Schema (not an OpenAPI document)
   const isStandalone = isStandaloneJsonSchema(doc);
+
+  const supportsUnevaluated = documentSupportsUnevaluatedProperties(doc);
+  const containsAllOfRefs = documentContainsAllOfRefs(doc);
 
   // Check if using unevaluatedProperties and validate version compatibility
   if (useUnevaluated) {
@@ -51,9 +54,7 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
     const hasExplicitVersion = oasVersion || schemaVersion;
     
     if (hasExplicitVersion) {
-      const isCompatible = documentSupportsUnevaluatedProperties(doc);
-      
-      if (!isCompatible) {
+      if (!supportsUnevaluated) {
         if (opts.uplift) {
           // Automatically upgrade the version
           if (oasVersion) {
@@ -88,29 +89,19 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
       );
     }
   }
-
-  // Additional check: when using `additionalProperties:false` (i.e. not using
-  // unevaluatedProperties) we must ensure that sealing will actually cover
-  // composed schemas. In OpenAPI 3.0 and JSON Schema drafts before 2019-09,
-  // `additionalProperties: false` does NOT apply across `allOf` composition in
-  // a way that reliably seals extended models. If the document contains any
-  // schema using `allOf` compositions referencing other schemas, sealing with
-  // `additionalProperties:false` may be ineffective. In that case we should
-  // throw an error unless `useUnevaluatedProperties` is true or `uplift` is set
-  // (to upgrade the document to a version that supports `unevaluatedProperties`).
+  // If not using unevaluatedProperties, validate compatibility
   if (!useUnevaluated) {
-    validateAdditionalPropertiesCompatibility(doc);
+    validateAdditionalPropertiesCompatibility(doc, supportsUnevaluated, containsAllOfRefs);
   }
 
 
 /**
- * Determine whether the provided document contains any schemas that use
- * `allOf` referencing other schemas (simple $ref in allOf entries).
+ * Determine whether the provided document contains any schemas that use `allOf`
  */
 function documentContainsAllOfRefs(doc: any): boolean {
-  // Use JSONPath to find any allOf entries that contain a $ref anywhere in the document
+  // Use JSONPath to find any allOf entries 
   try {
-    const matches = JSONPath({ path: "$..allOf[*].$ref", json: doc });
+    const matches = JSONPath({ path: "$..allOf", json: doc });
     return Array.isArray(matches) && matches.length > 0;
   } catch (e) {
     // If JSONPath fails for some reason, fall back to conservative false
@@ -125,13 +116,16 @@ function documentContainsAllOfRefs(doc: any): boolean {
  * a descriptive error when an explicit older version is present and the
  * document contains allOf references that would make sealing ineffective.
  */
-function validateAdditionalPropertiesCompatibility(doc: any): void {
+function validateAdditionalPropertiesCompatibility(
+  doc: any,
+  supportsUnevaluated: boolean,
+  containsAllOfRefs: boolean
+): void {
   const oasVersion = getOpenApiVersion(doc);
   const schemaVersion = getJsonSchemaVersion(doc);
   const hasExplicitVersion = oasVersion || schemaVersion;
 
-  const supportsUnevaluated = documentSupportsUnevaluatedProperties(doc);
-  if (hasExplicitVersion && !supportsUnevaluated && documentContainsAllOfRefs(doc)) {
+  if (hasExplicitVersion && !supportsUnevaluated && containsAllOfRefs) {
     const versionInfo = oasVersion ? `OpenAPI ${oasVersion}` : `JSON Schema ${schemaVersion}`;
     throw new Error(
       `Sealing via additionalProperties:false cannot reliably cover schemas composed with allOf in ${versionInfo}. ` +
@@ -158,10 +152,10 @@ function validateAdditionalPropertiesCompatibility(doc: any): void {
   for (const [schemaName, schema] of Object.entries(schemas)) {
     if (schema && typeof schema === "object") {
       if (schema.$defs && typeof schema.$defs === "object") {
-        sealNestedSchemas(schema, "$defs", sealing);
+        sealNestedSchemas(schema, "$defs", sealing, supportsUnevaluated);
       }
       if (schema.definitions && typeof schema.definitions === "object") {
-        sealNestedSchemas(schema, "definitions", sealing);
+        sealNestedSchemas(schema, "definitions", sealing, supportsUnevaluated);
       }
     }
   }
@@ -256,7 +250,7 @@ function validateAdditionalPropertiesCompatibility(doc: any): void {
   }
 
   // Step 5: Recursively seal inline object schemas
-  sealInlineSchemas(schemas, sealing);
+  sealInlineSchemas(schemas, sealing, supportsUnevaluated);
 
   // If this was a standalone schema, extract and return it
   if (wrappedName && isStandalone) {
@@ -270,7 +264,12 @@ function validateAdditionalPropertiesCompatibility(doc: any): void {
  * Recursively seal nested schemas within a schema.
  * This handles JSON Schema models that contain nested subschemas in $defs or definitions.
  */
-function sealNestedSchemas(schema: any, defsKey: "$defs" | "definitions", sealing: string): void {
+function sealNestedSchemas(
+  schema: any,
+  defsKey: "$defs" | "definitions",
+  sealing: string,
+  supportsUnevaluated: boolean
+): void {
   if (!schema || typeof schema !== "object" || !schema[defsKey]) return;
 
   const defs = schema[defsKey];
@@ -358,7 +357,7 @@ function sealNestedSchemas(schema: any, defsKey: "$defs" | "definitions", sealin
   }
 
   // Step 5: Recursively seal inline schemas in $defs
-  sealInlineSchemas(defs, sealing);
+  sealInlineSchemas(defs, sealing, supportsUnevaluated);
 
   // Step 6: Seal the root schema itself if it has sealable content
   if (hasSealableContent(schema) && isObjectLike(schema) && !isPreSealed(schema)) {
@@ -461,7 +460,11 @@ function unescapePointer(part: string): string {
 /**
  * Recursively seal inline object schemas (properties, items, etc.).
  */
-function sealInlineSchemas(schemas: Record<string, any>, sealing: string): void {
+function sealInlineSchemas(
+  schemas: Record<string, any>,
+  sealing: string,
+  supportsUnevaluated: boolean
+): void {
   const sealRecursive = (obj: any): void => {
     if (!obj || typeof obj !== "object") return;
 
@@ -469,8 +472,9 @@ function sealInlineSchemas(schemas: Record<string, any>, sealing: string): void 
       const hasComposition = Boolean(obj.allOf || obj.anyOf || obj.oneOf);
       const hasRef = Boolean(findRefsInObject(obj).length > 0);
 
-      // Seal inline object if it's not just a reference/composition
-      if (!hasRef && !hasComposition) {
+      if (hasComposition && supportsUnevaluated) {
+        obj.unevaluatedProperties = false;
+      } else if (!hasRef && !hasComposition) {
         obj[sealing] = false;
       }
     }

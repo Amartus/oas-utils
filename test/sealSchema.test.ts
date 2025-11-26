@@ -231,6 +231,35 @@ describe("sealSchema", () => {
       expect(doc.components.schemas.Cat.additionalProperties).toBe(false);
     });
 
+    it("no additionalProperties at the allOf level", () => {
+      const doc: any = {
+        $schema: "https://json-schema.org/draft/2019-09/schema",
+        properties: {
+          prop1: {
+            allOf: [
+              { type: "object", properties: { a: { type: "string" } } },
+              { type: "string"}
+            ]
+          }, 
+          prop2: {
+            allOf: [
+              {"$ref": "#/definitions/Animal"},
+              { type: "object", properties: { extra: { type: "number" } } }
+            ]
+          }
+        },
+        definitions: {
+          Animal: loadSchemaFromFile("animal")
+        }
+      };
+        
+      expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).not.toThrow();
+      expect(doc.properties.prop1.additionalProperties).not.toBeDefined();
+      expect(doc.properties.prop1.unevaluatedProperties).toBe(false);
+      expect(doc.properties.prop2.additionalProperties).not.toBeDefined();
+      expect(doc.properties.prop2.unevaluatedProperties).toBe(false);
+    });
+
     it("seals oneOf composition roots", () => {
       const catOption = withoutProperties(loadSchemaFromFile("animal"), ["id", "name"]);
       const dogOption = { type: "object", properties: { bark: { type: "boolean" } } };
