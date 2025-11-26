@@ -8,7 +8,7 @@ import {
 } from "./oasUtils.js";
 
 import { JSONPath } from "jsonpath-plus";
-import { extractDefRefName } from "./jsonSchemaUtils";
+import { extractDefRefName } from "./jsonSchemaUtils.js";
 
 export interface SealSchemaOptions {
   /** If true, use unevaluatedProperties: false instead of additionalProperties: false (default: true) */
