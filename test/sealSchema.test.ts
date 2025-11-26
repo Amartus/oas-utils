@@ -8,6 +8,7 @@ import {
   withDescription,
   withMetadata,
   sealed,
+  testSchemas,
 } from "./schemaLoader.js";
 
 describe("sealSchema", () => {
@@ -208,6 +209,26 @@ describe("sealSchema", () => {
       sealSchema(doc);
 
       expect(doc.components.schemas.Result.unevaluatedProperties).toBe(false);
+    });
+
+    it("allows additionalProperties when JSON Schema 2020-12 handles unevaluatedProperties", () => {
+      const createAnimalCatDoc = () => ({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        components: {
+          schemas: {
+            Animal: testSchemas.animal(),
+            Cat: {
+              allOf: [{ $ref: "#/components/schemas/Animal" }],
+            },
+          },
+        },
+      });
+
+      const doc: any = createAnimalCatDoc();
+
+      expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).not.toThrow();
+      expect(doc.components.schemas.Animal.additionalProperties).toBe(false);
+      expect(doc.components.schemas.Cat.additionalProperties).toBe(false);
     });
 
     it("seals oneOf composition roots", () => {

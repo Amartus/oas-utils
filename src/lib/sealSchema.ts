@@ -130,7 +130,8 @@ function validateAdditionalPropertiesCompatibility(doc: any): void {
   const schemaVersion = getJsonSchemaVersion(doc);
   const hasExplicitVersion = oasVersion || schemaVersion;
 
-  if (hasExplicitVersion && documentContainsAllOfRefs(doc)) {
+  const supportsUnevaluated = documentSupportsUnevaluatedProperties(doc);
+  if (hasExplicitVersion && !supportsUnevaluated && documentContainsAllOfRefs(doc)) {
     const versionInfo = oasVersion ? `OpenAPI ${oasVersion}` : `JSON Schema ${schemaVersion}`;
     throw new Error(
       `Sealing via additionalProperties:false cannot reliably cover schemas composed with allOf in ${versionInfo}. ` +
