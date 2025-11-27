@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.5] - 2025-11-27
+### Changed
+- Introduced a template-style sealing pipeline (`SchemaSealerTemplate`, `ComponentSchemaSealer`, `NestedSchemaSealer`) so OpenAPI versus standalone JSON Schema handling share the same core steps while only the normalization/finalization hooks differ.
+- Consolidated the `allOf` reference rewrites behind `updateAllOfReferencesWithQuery`, keeping both component-level and nested updates in sync.
+- Separated document entry points via explicit handlers (`jsonSchemaSealHandler` vs `openApiSealHandler`) so the core `sealSchema` flow is easier to extend without duplicating context logic.
+
 ## [0.3.4] - 2025-11-26
 ### Fixed
 - `sealSchema` no longer blocks `additionalProperties:false` sealing for documents that already target JSON Schema 2020-12 (or OpenAPI 3.1) and therefore support `unevaluatedProperties`; the compatibility guard now only throws when the schema version lacks native `unevaluatedProperties` support.
