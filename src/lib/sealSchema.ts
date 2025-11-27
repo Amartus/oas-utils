@@ -8,7 +8,6 @@ import {
 } from "./oasUtils.js";
 
 import { JSONPath } from "jsonpath-plus";
-import { extractDefRefName } from "./jsonSchemaUtils.js";
 
 export interface SealSchemaOptions {
   /** If true, use unevaluatedProperties: false instead of additionalProperties: false (default: true) */
@@ -94,6 +93,17 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
     validateAdditionalPropertiesCompatibility(doc, supportsUnevaluated, containsAllOfRefs);
   }
 
+  const handler = selectSealHandler(isStandalone);
+  const context = handler.createContext(doc);
+  const normalizedSchemas = context.schemas;
+  if (!normalizedSchemas || typeof normalizedSchemas !== "object") return doc;
+
+  applySealingToSchemaMap(normalizedSchemas, sealing, supportsUnevaluated);
+
+  return handler.finalize(doc, context);
+
+}
+
 
 /**
  * Determine whether the provided document contains any schemas that use `allOf`
@@ -133,235 +143,231 @@ function validateAdditionalPropertiesCompatibility(
     );
   }
 }
-  
-  let schemas: Record<string, any> | undefined;
-  let wrappedName: string = "";
 
-  if (isStandalone) {
-    // Wrap the standalone schema in an OpenAPI structure
-    wrappedName = doc.title || "Root";
-    schemas = {};
-    schemas[wrappedName] = doc;
-  } else {
-    schemas = doc.components?.schemas;
-  }
-
-  if (!schemas || typeof schemas !== "object") return doc;
-
-  // Handle each schema's $defs and definitions (for JSON Schema models)
-  for (const [schemaName, schema] of Object.entries(schemas)) {
-    if (schema && typeof schema === "object") {
-      if (schema.$defs && typeof schema.$defs === "object") {
-        sealNestedSchemas(schema, "$defs", sealing, supportsUnevaluated);
-      }
-      if (schema.definitions && typeof schema.definitions === "object") {
-        sealNestedSchemas(schema, "definitions", sealing, supportsUnevaluated);
-      }
-    }
-  }
-
-  // Step 1: Find all schemas referenced in allOf (core candidates)
-  const referencedInAllOf = new Set<string>();
-  for (const schema of Object.values(schemas)) {
-    if (!schema || typeof schema !== "object") continue;
-    if (!Array.isArray(schema.allOf)) continue;
-
-    for (const item of schema.allOf) {
-      if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
-        const refName = refToName((item as any).$ref);
-        if (refName && schemas[refName]) {
-          referencedInAllOf.add(refName);
-        }
-      }
-    }
-  }
-
-  // Step 2: Classify and create Core variants for core-candidates
-  const coreMapping = new Map<string, string>(); // original -> core name
-  for (const name of referencedInAllOf) {
-    const schema = schemas[name];
-    if (
-      schema &&
-      typeof schema === "object" &&
-      !isPreSealed(schema) &&
-      isObjectLike(schema)
-    ) {
-      const coreName = `${name}Core`;
-      coreMapping.set(name, coreName);
-
-      // Clone original schema as Core (without sealing keywords)
-      const coreSchema = deepClone(schema);
-      removeSealing(coreSchema);
-
-      // Replace original with sealed wrapper
-      const wrapper: any = {
-        allOf: [{ $ref: `#/components/schemas/${coreName}` }],
-      };
-      wrapper[sealing] = false;
-
-      // Preserve description if present in original
-      if (coreSchema.description) {
-        wrapper.description = coreSchema.description;
-        delete coreSchema.description; // Remove from core to avoid duplication
-      }
-
-      schemas[coreName] = coreSchema;
-      schemas[name] = wrapper;
-    }
-  }
-
-  // Step 3: Rewrite references inside allOf to point to Core variants
-  for (const [originalName, coreName] of coreMapping.entries()) {
-    updateAllOfReferences(schemas, originalName, coreName);
-  }
-
-  // Step 4: Seal composition roots and direct-only objects
-  for (const [name, schema] of Object.entries(schemas)) {
-    if (!schema || typeof schema !== "object") continue;
-
-    // Skip if already sealed
-    if (schema[sealing] === false || schema.additionalProperties === false) {
-      continue;
-    }
-
-    // Check if this is a wrapper we created (single-item allOf pointing to Core)
-    const isWrapper =
-      schema.allOf &&
-      schema.allOf.length === 1 &&
-      typeof (schema.allOf[0] as any).$ref === "string" &&
-      (schema.allOf[0] as any).$ref.includes("Core");
-
-    // Only seal if there's sealable content (properties or composition)
-    if (!hasSealableContent(schema)) {
-      continue;
-    }
-
-    // Seal composition roots (allOf/anyOf/oneOf) - except wrappers we just created
-    if (
-      !isWrapper &&
-      (schema.allOf || schema.anyOf || schema.oneOf) &&
-      isObjectLike(schema)
-    ) {
-      schema[sealing] = false;
-    } else if (!coreMapping.has(name) && isObjectLike(schema) && !name.endsWith("Core")) {
-      // Seal direct-only object schemas (not core-candidates and not cores themselves)
-      schema[sealing] = false;
-    }
-  }
-
-  // Step 5: Recursively seal inline object schemas
-  sealInlineSchemas(schemas, sealing, supportsUnevaluated);
-
-  // If this was a standalone schema, extract and return it
-  if (wrappedName && isStandalone) {
-    return schemas[wrappedName];
-  }
-
-  return doc;
+interface SealContext {
+  schemas: Record<string, any> | undefined;
+  wrappedName: string;
+  isStandalone: boolean;
 }
 
-/**
- * Recursively seal nested schemas within a schema.
- * This handles JSON Schema models that contain nested subschemas in $defs or definitions.
- */
-function sealNestedSchemas(
-  schema: any,
-  defsKey: "$defs" | "definitions",
+interface SealHandler {
+  createContext(doc: any): SealContext;
+  finalize(doc: any, context: SealContext): any;
+}
+
+const openApiSealHandler: SealHandler = {
+  createContext(doc: any): SealContext {
+    return {
+      schemas: doc.components?.schemas,
+      wrappedName: "",
+      isStandalone: false,
+    };
+  },
+  finalize(doc: any): any {
+    return doc;
+  },
+};
+
+const jsonSchemaSealHandler: SealHandler = {
+  createContext(doc: any): SealContext {
+    const wrappedName = doc.title || "Root";
+    return {
+      schemas: { [wrappedName]: doc },
+      wrappedName,
+      isStandalone: true,
+    };
+  },
+  finalize(doc: any, context: SealContext): any {
+    if (context.wrappedName && context.schemas) {
+      return context.schemas[context.wrappedName];
+    }
+    return doc;
+  },
+};
+
+function selectSealHandler(isStandalone: boolean): SealHandler {
+  return isStandalone ? jsonSchemaSealHandler : openApiSealHandler;
+}
+
+function applySealingToSchemaMap(
+  schemas: Record<string, any>,
   sealing: string,
   supportsUnevaluated: boolean
 ): void {
-  if (!schema || typeof schema !== "object" || !schema[defsKey]) return;
+  if (!schemas || typeof schemas !== "object") return;
 
-  const defs = schema[defsKey];
+  new ComponentSchemaSealer(schemas, sealing, supportsUnevaluated).run();
+}
 
-  // Step 1: Find all schemas referenced in allOf within $defs
-  const referencedInAllOf = new Set<string>();
-  for (const def of Object.values(defs)) {
-    if (!def || typeof def !== "object") continue;
-    const defAny = def as any;
-    if (!Array.isArray(defAny.allOf)) continue;
+abstract class SchemaSealerTemplate {
+  protected constructor(
+    protected schemas: Record<string, any>,
+    protected sealing: string,
+    protected supportsUnevaluated: boolean
+  ) {}
 
-    for (const item of defAny.allOf) {
-      if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
-        const refName = extractDefRefName((item as any).$ref);
-        if (refName && defs[refName]) {
-          referencedInAllOf.add(refName);
+  public run(): void {
+    if (!this.schemas || typeof this.schemas !== "object") return;
+
+    this.preprocess();
+    const referenced = this.collectReferencedInAllOf();
+    const coreMapping = this.createCoreMapping(referenced);
+    this.rewriteReferences(coreMapping);
+    this.sealSchemas(coreMapping);
+    sealInlineSchemas(this.schemas, this.sealing, this.supportsUnevaluated);
+    this.postprocess();
+  }
+
+  protected preprocess(): void {}
+  protected postprocess(): void {}
+  protected abstract updateReference(originalName: string, coreName: string): void;
+  protected abstract getCoreRef(coreName: string): string;
+
+  private collectReferencedInAllOf(): Set<string> {
+    const referenced = new Set<string>();
+    for (const schema of Object.values(this.schemas)) {
+      if (!schema || typeof schema !== "object") continue;
+      if (!Array.isArray(schema.allOf)) continue;
+
+      for (const item of schema.allOf) {
+        if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
+          const refName = refToName((item as any).$ref);
+          if (refName && this.schemas[refName]) {
+            referenced.add(refName);
+          }
         }
       }
     }
+    return referenced;
   }
 
-  // Step 2: Create Core variants for schemas referenced in allOf
-  const coreMapping = new Map<string, string>();
-  for (const name of referencedInAllOf) {
-    const def = defs[name];
-    if (
-      def &&
-      typeof def === "object" &&
-      !isPreSealed(def) &&
-      isObjectLike(def)
-    ) {
-      const coreName = `${name}Core`;
-      coreMapping.set(name, coreName);
+  private createCoreMapping(referenced: Set<string>): Map<string, string> {
+    const coreMapping = new Map<string, string>();
+    for (const name of referenced) {
+      const schema = this.schemas[name];
+      if (
+        schema &&
+        typeof schema === "object" &&
+        !isPreSealed(schema) &&
+        isObjectLike(schema)
+      ) {
+        const coreName = `${name}Core`;
+        coreMapping.set(name, coreName);
 
-      const coreSchema = deepClone(def);
-      removeSealing(coreSchema);
+        const coreSchema = deepClone(schema);
+        removeSealing(coreSchema);
 
-      const refPath = defsKey === "$defs" ? `#/$defs/${coreName}` : `#/definitions/${coreName}`;
-      const wrapper: any = {
-        allOf: [{ $ref: refPath }],
-      };
-      wrapper[sealing] = false;
+        const wrapper: any = {
+          allOf: [{ $ref: this.getCoreRef(coreName) }],
+        };
+        wrapper[this.sealing] = false;
 
-      const coreSchemaAny = coreSchema as any;
-      if (coreSchemaAny.description) {
-        wrapper.description = coreSchemaAny.description;
-        delete coreSchemaAny.description;
+        if (coreSchema.description) {
+          wrapper.description = coreSchema.description;
+          delete coreSchema.description;
+        }
+
+        this.schemas[coreName] = coreSchema;
+        this.schemas[name] = wrapper;
+      }
+    }
+    return coreMapping;
+  }
+
+  private rewriteReferences(coreMapping: Map<string, string>): void {
+    for (const [originalName, coreName] of coreMapping.entries()) {
+      this.updateReference(originalName, coreName);
+    }
+  }
+
+  private sealSchemas(coreMapping: Map<string, string>): void {
+    for (const [name, schema] of Object.entries(this.schemas)) {
+      if (!schema || typeof schema !== "object") continue;
+
+      if (schema[this.sealing] === false || schema.additionalProperties === false) {
+        continue;
       }
 
-      defs[coreName] = coreSchema;
-      defs[name] = wrapper;
+      if (!hasSealableContent(schema)) {
+        continue;
+      }
+
+      const isWrapper =
+        schema.allOf &&
+        schema.allOf.length === 1 &&
+        typeof (schema.allOf[0] as any).$ref === "string" &&
+        (schema.allOf[0] as any).$ref.includes("Core");
+
+      if (
+        !isWrapper &&
+        (schema.allOf || schema.anyOf || schema.oneOf) &&
+        isObjectLike(schema)
+      ) {
+        schema[this.sealing] = false;
+      } else if (!coreMapping.has(name) && isObjectLike(schema) && !name.endsWith("Core")) {
+        schema[this.sealing] = false;
+      }
+    }
+  }
+}
+
+class ComponentSchemaSealer extends SchemaSealerTemplate {
+  constructor(
+    schemas: Record<string, any>,
+    sealing: string,
+    supportsUnevaluated: boolean
+  ) {
+    super(schemas, sealing, supportsUnevaluated);
+  }
+
+  protected preprocess(): void {
+    for (const schema of Object.values(this.schemas)) {
+      if (!schema || typeof schema !== "object") continue;
+      if (schema.$defs && typeof schema.$defs === "object") {
+        new NestedSchemaSealer(schema, "$defs", this.sealing, this.supportsUnevaluated).run();
+      }
+      if (schema.definitions && typeof schema.definitions === "object") {
+        new NestedSchemaSealer(schema, "definitions", this.sealing, this.supportsUnevaluated).run();
+      }
     }
   }
 
-  // Step 3: Rewrite references inside allOf to point to Core variants
-  for (const [originalName, coreName] of coreMapping.entries()) {
-    updateNestedAllOfReferences(defs, originalName, coreName, defsKey);
+  protected getCoreRef(coreName: string): string {
+    return `#/components/schemas/${coreName}`;
   }
 
-  // Step 4: Seal composition roots and direct-only objects in $defs
-  for (const [name, def] of Object.entries(defs)) {
-    if (!def || typeof def !== "object") continue;
+  protected updateReference(originalName: string, coreName: string): void {
+    updateAllOfReferences(this.schemas, originalName, coreName);
+  }
+}
 
-    const defAny = def as any;
-    if (defAny[sealing] === false || defAny.additionalProperties === false) {
-      continue;
-    }
+class NestedSchemaSealer extends SchemaSealerTemplate {
+  constructor(
+    private parent: any,
+    private defsKey: "$defs" | "definitions",
+    sealing: string,
+    supportsUnevaluated: boolean
+  ) {
+    super(parent[defsKey], sealing, supportsUnevaluated);
+  }
 
-    const isWrapper =
-      defAny.allOf &&
-      defAny.allOf.length === 1 &&
-      typeof (defAny.allOf[0] as any).$ref === "string" &&
-      (defAny.allOf[0] as any).$ref.includes("Core");
-
-    // Only seal if there's sealable content
-    if (!hasSealableContent(def)) {
-      continue;
-    }
-
-    if (!isWrapper && (defAny.allOf || defAny.anyOf || defAny.oneOf) && isObjectLike(def)) {
-      defAny[sealing] = false;
-    } else if (!coreMapping.has(name) && isObjectLike(def) && !name.endsWith("Core")) {
-      defAny[sealing] = false;
+  protected postprocess(): void {
+    if (
+      this.parent &&
+      hasSealableContent(this.parent) &&
+      isObjectLike(this.parent) &&
+      !isPreSealed(this.parent)
+    ) {
+      this.parent[this.sealing] = false;
     }
   }
 
-  // Step 5: Recursively seal inline schemas in $defs
-  sealInlineSchemas(defs, sealing, supportsUnevaluated);
+  protected getCoreRef(coreName: string): string {
+    return this.defsKey === "$defs" ? `#/$defs/${coreName}` : `#/definitions/${coreName}`;
+  }
 
-  // Step 6: Seal the root schema itself if it has sealable content
-  if (hasSealableContent(schema) && isObjectLike(schema) && !isPreSealed(schema)) {
-    schema[sealing] = false;
+  protected updateReference(originalName: string, coreName: string): void {
+    updateNestedAllOfReferences(this.schemas, originalName, coreName, this.defsKey);
   }
 }
 
@@ -377,28 +383,10 @@ function updateNestedAllOfReferences(
   const refPrefix = defsKey === "$defs" ? "#/$defs" : "#/definitions";
   const originalRef = `${refPrefix}/${originalName}`;
   const coreRef = `${refPrefix}/${coreName}`;
+  const pointerRoot = { [defsKey]: defs };
+  const query = `$.${defsKey}..allOf[?(@.$ref=='${originalRef}')]`;
 
-  // Use JSONPath to find all matching allOf entries with the originalRef and update them
-  try {
-    const query = `$.${defsKey}..allOf[?(@.$ref=='${originalRef}')]`;
-    const pointers: string[] = JSONPath({ path: query, json: { [defsKey]: defs }, resultType: 'pointer' }) as string[];
-    for (const ptr of pointers) {
-      // pointer points to the matching allOf item; we need to set its $ref to coreRef
-      setJsonPointer({ [defsKey]: defs }, ptr + '/$ref', coreRef);
-    }
-  } catch (e) {
-    // Fallback to original loop if JSONPath fails
-    for (const def of Object.values(defs)) {
-      if (!def || typeof def !== "object") continue;
-      if (!Array.isArray((def as any).allOf)) continue;
-
-      for (const item of (def as any).allOf) {
-        if (item && typeof item === "object" && (item as any).$ref === originalRef) {
-          (item as any).$ref = coreRef;
-        }
-      }
-    }
-  }
+  updateAllOfReferencesWithQuery(defs, originalRef, coreRef, query, pointerRoot);
 }
 
 
@@ -412,16 +400,26 @@ function updateAllOfReferences(
 ): void {
   const originalRef = `#/components/schemas/${originalName}`;
   const coreRef = `#/components/schemas/${coreName}`;
+  const pointerRoot = { components: { schemas } };
+  const query = `$.components.schemas..allOf[?(@.$ref=='${originalRef}')]`;
 
+  updateAllOfReferencesWithQuery(schemas, originalRef, coreRef, query, pointerRoot);
+}
+
+function updateAllOfReferencesWithQuery(
+  scope: Record<string, any>,
+  originalRef: string,
+  coreRef: string,
+  query: string,
+  pointerRoot: Record<string, any>
+): void {
   try {
-    const query = `$.components.schemas..allOf[?(@.$ref=='${originalRef}')]`;
-    const pointers: string[] = JSONPath({ path: query, json: { components: { schemas } }, resultType: 'pointer' }) as string[];
+    const pointers: string[] = JSONPath({ path: query, json: pointerRoot, resultType: "pointer" }) as string[];
     for (const ptr of pointers) {
-      setJsonPointer({ components: { schemas } }, ptr + '/$ref', coreRef);
+      setJsonPointer(pointerRoot, ptr + "/$ref", coreRef);
     }
   } catch (e) {
-    // Fallback to original loop
-    for (const schema of Object.values(schemas)) {
+    for (const schema of Object.values(scope)) {
       if (!schema || typeof schema !== "object") continue;
       if (!Array.isArray((schema as any).allOf)) continue;
 
