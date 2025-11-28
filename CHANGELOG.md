@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6] - 2025-11-28
+### Added
+- Introduced a minimal polymorphic OpenAPI 3.1 example (`examples/polymorphic-minimal.yaml`) showcasing `allOf` inheritance with a discriminator-based base schema.
+
+### Changed
+- Extended `allOfToOneOf` to support nested polymorphic bases with their own wrappers, ensuring parent wrappers expose child polymorphic wrappers instead of raw bases.
+- Updated reference-rewrite logic to support propert `oneOf` accross full spec.
+
 ## [0.3.5] - 2025-11-27
 ### Changed
 - Introduced a template-style sealing pipeline (`SchemaSealerTemplate`, `ComponentSchemaSealer`, `NestedSchemaSealer`) so OpenAPI versus standalone JSON Schema handling share the same core steps while only the normalization/finalization hooks differ.
