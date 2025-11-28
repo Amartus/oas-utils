@@ -106,6 +106,22 @@ export function loadSchemasFromFiles(
 }
 
 /**
+ * Delete a property identified by a JSON Pointer string from the given object.
+ * Uses json-p3's JSONPointer helper to resolve the parent and remove the property.
+ */
+import { JSONPointer } from "json-p3";
+
+export function deleteByPointer(root: any, pointer: string): void {
+  const p = new JSONPointer(pointer);
+  const parent = p.parent().resolve(root, undefined as any);
+  const segs = p.toString().split("/").slice(1);
+  const last = decodeURIComponent(segs[segs.length - 1]);
+  if (parent && typeof parent === "object" && Object.prototype.hasOwnProperty.call(parent, last)) {
+    delete (parent as any)[last];
+  }
+}
+
+/**
  * Common test schemas for reuse across all tests
  */
 export const testSchemas = {

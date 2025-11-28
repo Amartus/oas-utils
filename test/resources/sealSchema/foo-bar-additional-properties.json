@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/rootPolymorphic.schema.json",
+  "$comment": "Main JSON Schema where RootPolymorphic is the root and other schemas are in $defs",
+  "title": "RootPolymorphic",
+  "oneOf": [
+    { "$ref": "#/$defs/Foo" },
+    { "$ref": "#/$defs/Bar" }
+  ],
+  "discriminator": {
+    "propertyName": "name",
+    "mapping": {
+      "Foo": "#/$defs/Foo",
+      "Bar": "#/$defs/Bar"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "RootCore": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Foo": {
+      "allOf": [
+        { "$ref": "#/$defs/RootCore" },
+        {
+          "type": "object",
+          "properties": {
+            "fooChildren1": { 
+              "type": "array",
+              "items": { "$ref": "#/$defs/FooChild" }
+             },
+             "fooChildren2": {
+              "type": "array",
+              "items": { 
+                "type": "object",
+                "properties": {
+                  "subProp1": { "type": "string" },
+                  "subProp2": { "type": "number" }
+                },
+                "additionalProperties": false
+              }
+             }
+          },
+          "required": ["fooChildren1"]
+        },
+        {
+          "type": "object",
+          "properties": { "name": { "const": "Foo" } }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FooChild": {
+      "type": "object",
+      "properties": {
+        "prop1": { "type": "boolean" },
+        "prop2": { "type": "number" },
+        "prop3": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Bar": {
+      "allOf": [
+        { "$ref": "#/$defs/RootCore" },
+        {
+          "type": "object",
+          "properties": {
+            "barSpecific": { "type": "integer" }
+          },
+          "required": ["barSpecific"]
+        },
+        {
+          "type": "object",
+          "properties": { "name": { "const": "Bar" } }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
