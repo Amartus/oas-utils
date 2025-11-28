@@ -241,6 +241,202 @@ describe("allOfToOneOf", () => {
     );
   });
 
+  it("updates path-level request/response schemas that reference the polymorphic base", () => {
+    const doc: any = {
+      openapi: "3.1.0",
+      info: { title: "Polymorphic API", version: "1.0.0" },
+      paths: {
+        "/fooBar": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Animal" },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "OK",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Animal" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+            Dog: "#/components/schemas/Dog",
+          }),
+          Cat: testSchemas.catSpecialized(),
+          Dog: testSchemas.dogSpecialized(),
+        },
+      },
+    };
+
+    allOfToOneOf(doc);
+
+    expect(doc.components.schemas.AnimalPolymorphic).toBeDefined();
+    const ref = "#/components/schemas/AnimalPolymorphic";
+
+    expect(
+      doc.paths["/fooBar"].post.requestBody.content["application/json"].schema.$ref
+    ).toBe(ref);
+    expect(
+      doc.paths["/fooBar"].post.responses["200"].content["application/json"].schema.$ref
+    ).toBe(ref);
+  });
+
+  it("updates webhooks and shared components that reference the polymorphic base", () => {
+    const doc: any = {
+      openapi: "3.1.0",
+      info: { title: "Polymorphic API", version: "1.0.0" },
+      webhooks: {
+        myHook: {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Animal" },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        requestBodies: {
+          SharedAnimal: {
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Animal" },
+              },
+            },
+          },
+        },
+        responses: {
+          AnimalResponse: {
+            description: "Animal response",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Animal" },
+              },
+            },
+          },
+        },
+        parameters: {
+          AnimalParam: {
+            in: "query",
+            name: "animal",
+            schema: { $ref: "#/components/schemas/Animal" },
+          },
+        },
+        schemas: {
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+            Dog: "#/components/schemas/Dog",
+          }),
+          Cat: testSchemas.catSpecialized(),
+          Dog: testSchemas.dogSpecialized(),
+        },
+      },
+    };
+
+    allOfToOneOf(doc);
+
+    const ref = "#/components/schemas/AnimalPolymorphic";
+
+    expect(
+      doc.webhooks.myHook.post.requestBody.content["application/json"].schema.$ref
+    ).toBe(ref);
+    expect(
+      doc.components.requestBodies.SharedAnimal.content["application/json"].schema.$ref
+    ).toBe(ref);
+    expect(
+      doc.components.responses.AnimalResponse.content["application/json"].schema.$ref
+    ).toBe(ref);
+    expect(doc.components.parameters.AnimalParam.schema.$ref).toBe(ref);
+  });
+
+  it("updates additional component sections that reference the polymorphic base", () => {
+    const doc: any = {
+      openapi: "3.1.0",
+      components: {
+        schemas: {
+          Animal: testSchemas.animalWithDiscriminator({
+            Cat: "#/components/schemas/Cat",
+            Dog: "#/components/schemas/Dog",
+          }),
+          Cat: testSchemas.catSpecialized(),
+          Dog: testSchemas.dogSpecialized(),
+        },
+        headers: {
+          AnimalHeader: {
+            schema: { $ref: "#/components/schemas/Animal" }
+          }
+        },
+        callbacks: {
+          AnimalCallback: {
+            "{$request.body#/url}": {
+              post: {
+                requestBody: {
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "#/components/schemas/Animal" }
+                    }
+                  }
+                },
+                responses: {
+                  "200": {
+                    description: "OK",
+                    content: {
+                      "application/json": {
+                        schema: { $ref: "#/components/schemas/Animal" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        links: {
+          AnimalLink: {
+            requestBody: {
+              $ref: "#/components/schemas/Animal"
+            }
+          }
+        },
+        examples: {
+          AnimalExample: {
+            value: {
+              pet: { $ref: "#/components/schemas/Animal" }
+            }
+          }
+        }
+      }
+    };
+
+    const result = allOfToOneOf(doc, {});
+
+    const wrapperRef = "#/components/schemas/AnimalPolymorphic";
+    // headers schema is not rewritten (no allOf polymorphism context there)
+    expect((result.components.headers!.AnimalHeader.schema as any).$ref).toBe("#/components/schemas/Animal");
+    const cbOp = result.components.callbacks!.AnimalCallback["{$request.body#/url}"].post;
+    expect((cbOp.requestBody.content["application/json"].schema as any).$ref).toBe(wrapperRef);
+    expect((cbOp.responses["200"].content["application/json"].schema as any).$ref).toBe(wrapperRef);
+    expect((result.components.links!.AnimalLink.requestBody as any).$ref).toBe(wrapperRef);
+    // examples should remain unchanged
+    expect((result.components.examples!.AnimalExample.value.pet as any).$ref).toBe("#/components/schemas/Animal");
+  });
+
   it("skips transformation if only one specialization is found with ignoreSingleSpecialization=true", () => {
     const doc: any = {
       components: {
@@ -353,5 +549,145 @@ describe("allOfToOneOf", () => {
     // Verify base references are still there
     const baseRefs = dogAllOf.filter((item: any) => item && item.$ref);
     expect(baseRefs).toHaveLength(3); // PetFood, Pet, Animal
+  });
+
+  it("handles nested polymorphic bases with independent wrappers", () => {
+    const doc: any = {
+      openapi: "3.1.0",
+      components: {
+        schemas: {
+          Animal: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              type: { type: "string" },
+            },
+            discriminator: {
+              propertyName: "type",
+              mapping: {
+                Pet: "#/components/schemas/Pet", 
+                Bird: "#/components/schemas/Bird", 
+              },
+            },
+          },
+          Bird: {
+            allOf: [
+              { $ref: "#/components/schemas/Animal" },
+              {
+                type: "object",
+                properties: {
+                  wingSpan: { type: "number" },
+                },
+              },
+            ],
+          },
+          Pet: {
+            allOf: [
+              { $ref: "#/components/schemas/Animal" },
+              {
+                type: "object",
+                properties: {
+                  owner: { type: "string" },
+                },
+              },
+            ],
+            discriminator: {
+              propertyName: "type",
+              mapping: {
+                Cat: "#/components/schemas/Cat", 
+                Dog: "#/components/schemas/Dog", 
+              },
+            },
+          },
+          Dog: {
+            allOf: [
+              { $ref: "#/components/schemas/Pet" },
+              {
+                type: "object",
+                properties: {
+                  barkVolume: { type: "number" },
+                },
+              },
+            ],
+          },
+          Cat: {
+            allOf: [
+              { $ref: "#/components/schemas/Pet" },
+              {
+                type: "object",
+                properties: {
+                  lives: { type: "integer" },
+                },
+              },
+            ],
+          },
+          PetFood: testSchemas.food(),
+        },
+      },
+      paths: {
+        "/byBase": {
+          get: {
+            responses: {
+              "200": {
+                description: "Base A response",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Animal" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/byIntermediate": {
+          get: {
+            responses: {
+              "200": {
+                description: "Intermediate Pet response",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Pet" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/byLeaf": {
+          get: {
+            responses: {
+              "200": {
+                description: "Leaf D response",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Cat" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = allOfToOneOf(doc);
+    console.log(JSON.stringify(result, null, 2));
+
+    expect(result.components.schemas.AnimalPolymorphic).toBeDefined();
+    const aWrapperRefs = result.components.schemas.AnimalPolymorphic.oneOf.map((s: any) => s.$ref);
+    expect(aWrapperRefs).toContain("#/components/schemas/Bird");
+    expect(aWrapperRefs).toContain("#/components/schemas/PetPolymorphic");
+
+    expect(
+      result.paths["/byBase"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/AnimalPolymorphic");
+
+    expect(
+      result.paths["/byIntermediate"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/PetPolymorphic");
+
+    expect(
+      result.paths["/byLeaf"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/Cat");
   });
 });
