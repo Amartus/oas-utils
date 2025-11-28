@@ -64,7 +64,7 @@ describe("allOfToOneOf", () => {
     );
   });
 
-  it("preserves base schema discriminator by default", () => {
+  it("removes discriminator from base schema after conversion", () => {
     const doc: any = {
       components: {
         schemas: {
@@ -77,22 +77,6 @@ describe("allOfToOneOf", () => {
     };
 
     allOfToOneOf(doc);
-    expect(doc.components.schemas.Animal.discriminator).toBeDefined();
-  });
-
-  it("removes discriminator from base when option is set", () => {
-    const doc: any = {
-      components: {
-        schemas: {
-          Animal: testSchemas.animalWithDiscriminator({
-            Cat: "#/components/schemas/Cat",
-          }),
-          Cat: testSchemas.catSpecialized(),
-        },
-      },
-    };
-
-    allOfToOneOf(doc, { removeDiscriminatorFromBase: true });
     expect(doc.components.schemas.Animal.discriminator).toBeUndefined();
   });
 

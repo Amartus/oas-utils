@@ -2,8 +2,6 @@ import { refToName, buildInheritanceGraph } from "./oasUtils.js";
 
 
 export interface AllOfToOneOfOptions {
-  /** If true, remove discriminator from base schema and let oneOf wrapper handle it */
-  removeDiscriminatorFromBase?: boolean;
   /** If true, add const property with discriminator value to specialization schemas (default: true) */
   addDiscriminatorConst?: boolean;
   /** If true, skip oneOf transformation if only one specialization is found (default: false) */
@@ -139,12 +137,10 @@ export function allOfToOneOf(doc: any, opts: AllOfToOneOfOptions = {}): any {
     }
   }
 
-  // Step 6: Optionally remove discriminator from base schemas
-  if (opts.removeDiscriminatorFromBase) {
-    for (const baseName of baseSchemasWithDiscriminator.keys()) {
-      if (schemas[baseName] && polymorphicWrappers.has(baseName)) {
-        delete schemas[baseName].discriminator;
-      }
+  // Step 6: Always remove discriminator from base schemas that were converted
+  for (const baseName of baseSchemasWithDiscriminator.keys()) {
+    if (schemas[baseName] && polymorphicWrappers.has(baseName)) {
+      delete schemas[baseName].discriminator;
     }
   }
 

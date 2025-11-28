@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.7] - 2025-11-28
+### Changed
+- Fixed OAS with discriminator cleanup
+- Refined `allOfToOneOf` tests to assert the new discriminator ownership model.
+
 ## [0.3.6] - 2025-11-28
 ### Added
 - Introduced a minimal polymorphic OpenAPI 3.1 example (`examples/polymorphic-minimal.yaml`) showcasing `allOf` inheritance with a discriminator-based base schema.

@@ -174,7 +174,7 @@ export async function optimizeAllOf(
  * @param reader - Function to read input
  */
 export async function runAllOfToOneOf(
-  opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean },
+  opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -184,7 +184,6 @@ export async function runAllOfToOneOf(
 
   const beforeSchemas = Object.keys(doc.components.schemas);
   const topts: AllOfToOneOfOptions = {
-    removeDiscriminatorFromBase: Boolean(opts.removeDiscriminatorFromBase),
     addDiscriminatorConst: opts.addDiscriminatorConst !== false,
     ignoreSingleSpecialization: Boolean(opts.ignoreSingleSpecialization),
   };
