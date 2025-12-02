@@ -14,7 +14,6 @@
       "Bar": "#/$defs/Bar"
     }
   },
-  "unevaluatedProperties": false,
   "$defs": {
     "RootCore": {
       "type": "object",

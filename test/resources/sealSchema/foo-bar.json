@@ -14,9 +14,8 @@
       "Bar": "#/$defs/Bar"
     }
   },
-  "unevaluatedProperties": false,
   "$defs": {
-    "RootCore": {
+    "Root": {
       "type": "object",
       "properties": {
         "name": { "type": "string" }
@@ -25,7 +24,7 @@
     },
     "Foo": {
       "allOf": [
-        { "$ref": "#/$defs/RootCore" },
+        { "$ref": "#/$defs/Root" },
         {
           "type": "object",
           "properties": {
@@ -65,7 +64,7 @@
     },
     "Bar": {
       "allOf": [
-        { "$ref": "#/$defs/RootCore" },
+        { "$ref": "#/$defs/Root" },
         {
           "type": "object",
           "properties": {

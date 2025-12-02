@@ -1,6 +1,8 @@
 import * as fs from "fs";
+import * as fsPromises from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { parse as yamlParse } from "yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +30,25 @@ export function loadSchemaFromFile(filename: string): any {
   }
   
   throw new Error(`Schema file not found: ${filename}`);
+}
+
+/**
+ * Load a schema from any file path under resources directory
+ */
+export async function loadFromResources(relativePath: string): Promise<any> {
+  const fullPath = path.join(resourcesDir, relativePath);
+  try {
+    const content = await fsPromises.readFile(fullPath, "utf-8");
+    if (fullPath.endsWith(".json")) {
+      return JSON.parse(content);
+    } else if (fullPath.endsWith(".yaml") || fullPath.endsWith(".yml")) {
+      return yamlParse(content);
+    }
+    // unknown extension, return raw content
+    return content;
+  } catch (err) {
+    throw new Error(`File not found: ${relativePath}`);
+  }
 }
 
 /**
@@ -109,16 +130,15 @@ export function loadSchemasFromFiles(
  * Delete a property identified by a JSON Pointer string from the given object.
  * Uses json-p3's JSONPointer helper to resolve the parent and remove the property.
  */
-import { JSONPointer } from "json-p3";
+import { applyPatch, Operation } from 'fast-json-patch';
+
 
 export function deleteByPointer(root: any, pointer: string): void {
-  const p = new JSONPointer(pointer);
-  const parent = p.parent().resolve(root, undefined as any);
-  const segs = p.toString().split("/").slice(1);
-  const last = decodeURIComponent(segs[segs.length - 1]);
-  if (parent && typeof parent === "object" && Object.prototype.hasOwnProperty.call(parent, last)) {
-    delete (parent as any)[last];
+  const p: Operation = {
+    "op": "remove",
+    "path": pointer
   }
+  applyPatch(root, [p]);
 }
 
 /**

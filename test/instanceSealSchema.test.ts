@@ -3,7 +3,6 @@ import { sealSchema } from "../src/lib/sealSchema.js";
 import { loadSchemaFromFile } from "./schemaLoader.js";
 import { JSONPath } from "jsonpath-plus";
 import { deleteByPointer } from "./schemaLoader.js";
-import { before } from "node:test";
 
 function collectUnevaluatedPropertiesPointers(node: any): string[] {
   return JSONPath({
@@ -38,10 +37,8 @@ describe("foo-bar schema sealing", () => {
     });
 
     const afterPointers = collectUnevaluatedPropertiesPointers(sealed);
-    // checking that original unevaluatedProperties pointers are preserved
-
-    // The sealing process may add unevaluatedProperties in additional nested places
-    // — ensure all originally-present pointers are still present after sealing.
+    // The sealing process will add unevaluatedProperties to all object schemas
+    // so the coverage after sealing should be at least as comprehensive as before
     const beforeSet = new Set(beforePointers);
     const afterSet = new Set(afterPointers);
     if (afterSet.size !== beforeSet.size) {
@@ -51,9 +48,13 @@ describe("foo-bar schema sealing", () => {
       console.log('unevaluatedPointers after:', afterPointers);
     }
     expect(afterSet.size).toBe(beforeSet.size);
+
+    // All originally-present pointers should still be present after sealing
     for (const p of beforeSet) {
       expect(afterSet.has(p)).toBeTruthy();
     }
+    // New sealing should be added to ensure comprehensive coverage
+    expect(afterSet.size).toBe(beforeSet.size);
   });
 
   it("preserves additionalProperties coverage after sealing", () => {
@@ -77,10 +78,14 @@ describe("foo-bar schema sealing", () => {
 
     const afterUnevaluated = collectUnevaluatedPropertiesPointers(sealed);
     const afterAdditional = collectAdditionalPropertiesPointers(sealed);
-    // checking that original additional/unevaluated pointers are preserved
-
     
-
+    // The sealing process will add sealing to all object schemas
+    // Verify that previously-sealed locations remain sealed
+    const beforeAdditionalSet = new Set(beforeAdditional);
+    const beforeUnevaluatedSet = new Set(beforeUnevaluated);
+    const afterAdditionalSet = new Set(afterAdditional);
+    const afterUnevaluatedSet = new Set(afterUnevaluated);
+    
     if (new Set(afterAdditional).size !== new Set(beforeAdditional).size || new Set(afterUnevaluated).size !== new Set(beforeUnevaluated).size) {
       // eslint-disable-next-line no-console
       console.log('additional before:', beforeAdditional);
@@ -91,8 +96,19 @@ describe("foo-bar schema sealing", () => {
       // eslint-disable-next-line no-console
       console.log('unevaluated after (add test):', afterUnevaluated);
     }
-    expect(new Set(afterAdditional).size).toBe(new Set(beforeAdditional).size);
-    expect(new Set(afterUnevaluated).size).toBe(new Set(beforeUnevaluated).size);
-   
+    
+    expect(afterAdditionalSet.size).toBe(beforeAdditionalSet.size);
+    expect(afterUnevaluatedSet.size).toBe(beforeUnevaluatedSet.size);
+    
+    // All original additionalProperties should be preserved
+    for (const p of beforeAdditionalSet) {
+      expect(afterAdditionalSet.has(p)).toBeTruthy();
+    }
+    
+    // All original unevaluatedProperties should be preserved
+    // (some might be on composition roots even when using additionalProperties mode)
+    for (const p of beforeUnevaluatedSet) {
+      expect(afterUnevaluatedSet.has(p) || afterAdditionalSet.has(p)).toBeTruthy();
+    }
   });
 });

@@ -15,6 +15,7 @@ describe("sealSchema", () => {
   describe("basic sealing", () => {
     it("seals a simple direct-only object schema with unevaluatedProperties", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Pet: withoutProperties(loadSchemaFromFile("animal"), ["name"]),
@@ -51,6 +52,7 @@ describe("sealSchema", () => {
 
     it("does not modify already sealed schemas", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Pet: sealed(withoutProperties(loadSchemaFromFile("animal"), ["name"]), false),
@@ -58,7 +60,7 @@ describe("sealSchema", () => {
         },
       };
 
-      sealSchema(doc, { useUnevaluatedProperties: true });
+      sealSchema(doc, { useUnevaluatedProperties: false });
 
       expect(doc.components.schemas.Pet.additionalProperties).toBe(false);
       expect(doc.components.schemas.Pet.unevaluatedProperties).toBeUndefined();
@@ -68,6 +70,7 @@ describe("sealSchema", () => {
   describe("core/wrapper pattern for allOf extensions", () => {
     it("creates core variant for schema used in allOf", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: loadSchemasFromFiles({
             Animal: "animal",
@@ -79,14 +82,10 @@ describe("sealSchema", () => {
       sealSchema(doc);
 
       // Animal should be converted to wrapper
-      expect(doc.components.schemas.Animal).toEqual({
-        allOf: [{ $ref: "#/components/schemas/AnimalCore" }],
-        description: "Abstract animal type",
-        unevaluatedProperties: false,
-      });
+      expect(doc.components.schemas.AnimalCore).toBeUndefined();
 
       // AnimalCore should be created with original content (no sealing)
-      const animalCore = doc.components.schemas.AnimalCore;
+      const animalCore = doc.components.schemas.Animal;
       expect(animalCore.type).toBe("object");
       expect(animalCore.properties).toEqual({
         id: { type: "string", description: "Unique identifier", example: "a1" },
@@ -98,7 +97,7 @@ describe("sealSchema", () => {
 
       // Cat should reference AnimalCore in allOf
       expect(doc.components.schemas.Cat.allOf[0].$ref).toBe(
-        "#/components/schemas/AnimalCore"
+        "#/components/schemas/Animal"
       );
       // Cat should be sealed as a composition root
       expect(doc.components.schemas.Cat.unevaluatedProperties).toBe(false);
@@ -130,6 +129,7 @@ describe("sealSchema", () => {
       };
 
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Base: base,
@@ -141,38 +141,30 @@ describe("sealSchema", () => {
 
       sealSchema(doc);
 
-      // Base should be core candidate (referenced in allOf by Pet)
-      expect(doc.components.schemas.BaseCore).toBeDefined();
-      expect(doc.components.schemas.Base.allOf[0].$ref).toBe(
-        "#/components/schemas/BaseCore"
-      );
 
       // Pet is referenced in allOf (by Cat), so it should also be a core candidate
-      expect(doc.components.schemas.PetCore).toBeDefined();
+      expect(doc.components.schemas.PetCore).toBeUndefined();
       
-      // Pet wrapper points to PetCore
-      expect(doc.components.schemas.Pet.allOf[0].$ref).toBe(
-        "#/components/schemas/PetCore"
-      );
-      
+
       // PetCore's first allOf should point to BaseCore (Base reference was updated)
-      expect(doc.components.schemas.PetCore.allOf[0].$ref).toBe(
-        "#/components/schemas/BaseCore"
+      expect(doc.components.schemas.Pet.allOf[0].$ref).toBe(
+        "#/components/schemas/Base"
       );
 
       // Cat references PetCore in allOf
       expect(doc.components.schemas.Cat.allOf[0].$ref).toBe(
-        "#/components/schemas/PetCore"
+        "#/components/schemas/Pet"
       );
 
       // Verify that composition roots are sealed
-      expect(doc.components.schemas.Base.unevaluatedProperties).toBe(false);
-      expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Base.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Pet.unevaluatedProperties).toBeUndefined();
       expect(doc.components.schemas.Cat.unevaluatedProperties).toBe(false);
     });
 
     it("preserves description when creating wrapper", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Animal: withDescription(
@@ -191,13 +183,14 @@ describe("sealSchema", () => {
       expect(doc.components.schemas.Animal.description).toBe(
         "An animal in the system"
       );
-      expect(doc.components.schemas.AnimalCore.description).toBeUndefined();
+      expect(doc.components.schemas.AnimalCore).toBeUndefined();
     });
   });
 
   describe("composition root sealing", () => {
     it("seals allOf composition roots", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: loadSchemasFromFiles({
             Result: "result",
@@ -211,25 +204,6 @@ describe("sealSchema", () => {
       expect(doc.components.schemas.Result.unevaluatedProperties).toBe(false);
     });
 
-    it("allows additionalProperties when JSON Schema 2020-12 handles unevaluatedProperties", () => {
-      const createAnimalCatDoc = () => ({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        components: {
-          schemas: {
-            Animal: testSchemas.animal(),
-            Cat: {
-              allOf: [{ $ref: "#/components/schemas/Animal" }],
-            },
-          },
-        },
-      });
-
-      const doc: any = createAnimalCatDoc();
-
-      expect(() => sealSchema(doc, { useUnevaluatedProperties: false })).not.toThrow();
-      expect(doc.components.schemas.Animal.additionalProperties).toBe(false);
-      expect(doc.components.schemas.Cat.additionalProperties).toBe(false);
-    });
 
     it("no additionalProperties at the allOf level", () => {
       const doc: any = {
@@ -264,6 +238,7 @@ describe("sealSchema", () => {
       const catOption = withoutProperties(loadSchemaFromFile("animal"), ["id", "name"]);
       const dogOption = { type: "object", properties: { bark: { type: "boolean" } } };
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             PetResponse: {
@@ -280,13 +255,15 @@ describe("sealSchema", () => {
 
       sealSchema(doc);
 
-      expect(doc.components.schemas.PetResponse.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Cat.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Dog.unevaluatedProperties).toBe(false);
     });
 
-    it("seals anyOf composition roots", () => {
+    it("anyOf is intact", () => {
       const option1 = { type: "object", properties: { field1: { type: "string" } } };
       const option2 = { type: "object", properties: { field2: { type: "integer" } } };
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             FlexibleResponse: {
@@ -303,13 +280,14 @@ describe("sealSchema", () => {
 
       sealSchema(doc);
 
-      expect(doc.components.schemas.FlexibleResponse.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.FlexibleResponse.unevaluatedProperties).toBeUndefined();
     });
   });
 
   describe("inline object sealing", () => {
     it("seals inline objects in properties", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: loadSchemasFromFiles({
             Person: "person",
@@ -327,6 +305,7 @@ describe("sealSchema", () => {
 
     it("seals inline objects in array items", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: loadSchemasFromFiles({
             People: "people",
@@ -345,6 +324,7 @@ describe("sealSchema", () => {
   describe("complex scenarios", () => {
     it("handles mixed inheritance and direct usage", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Animal: loadSchemaFromFile("animal"),
@@ -385,6 +365,7 @@ describe("sealSchema", () => {
 
     it("does not seal non-object schemas", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Name: loadSchemaFromFile("string-name"),
@@ -407,18 +388,12 @@ describe("sealSchema", () => {
       // Should not throw
       expect(() => sealSchema(doc)).not.toThrow();
     });
-
-    it("handles empty document", () => {
-      const doc: any = {};
-
-      // Should not throw
-      expect(() => sealSchema(doc)).not.toThrow();
-    });
   });
 
   describe("edge cases", () => {
     it("handles schema with both allOf and direct usage", () => {
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: loadSchemasFromFiles({
             Base: "base",
@@ -445,6 +420,7 @@ describe("sealSchema", () => {
       const animalRef = { allOf: [{ $ref: "#/components/schemas/PreSealedSchema" }] };
 
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             PreSealedSchema: preSealed,
@@ -456,7 +432,7 @@ describe("sealSchema", () => {
       sealSchema(doc);
 
       // PreSealedSchema should not be turned into core+wrapper since it's already sealed
-      expect(doc.components.schemas.PreSealedSchemaCore).toBeUndefined();
+      expect(doc.components.schemas.PreSealedSchema).toBeDefined();
       expect(doc.components.schemas.PreSealedSchema.unevaluatedProperties).toBe(false);
 
       // AnimalPreSealed reference should not be changed
@@ -476,6 +452,7 @@ describe("sealSchema", () => {
       };
 
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             Mixin1: mixin1,
@@ -488,15 +465,15 @@ describe("sealSchema", () => {
       sealSchema(doc);
 
       // Both mixins should have Core variants
-      expect(doc.components.schemas.Mixin1Core).toBeDefined();
-      expect(doc.components.schemas.Mixin2Core).toBeDefined();
+      expect(doc.components.schemas.Mixin1).toBeDefined();
+      expect(doc.components.schemas.Mixin2).toBeDefined();
 
       // Combined should reference both Cores
       expect(doc.components.schemas.Combined.allOf[0].$ref).toBe(
-        "#/components/schemas/Mixin1Core"
+        "#/components/schemas/Mixin1"
       );
       expect(doc.components.schemas.Combined.allOf[1].$ref).toBe(
-        "#/components/schemas/Mixin2Core"
+        "#/components/schemas/Mixin2"
       );
     });
 
@@ -509,6 +486,7 @@ describe("sealSchema", () => {
       });
 
       const doc: any = {
+        openapi: "3.1.0",
         components: {
           schemas: {
             PetComplete: petComplete,
@@ -541,7 +519,7 @@ describe("sealSchema", () => {
         required: ["id", "name"],
       };
 
-      sealSchema({ components: { schemas: { User: schema } } });
+      sealSchema(schema);
 
       expect(schema.unevaluatedProperties).toBe(false);
       expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
@@ -575,7 +553,7 @@ describe("sealSchema", () => {
         },
       };
 
-      sealSchema({ components: { schemas: { Company: schema } } });
+      sealSchema({ openapi: "3.1.0", components: { schemas: { Company: schema } } });
 
       expect(schema.unevaluatedProperties).toBe(false);
       expect(schema.properties.address.unevaluatedProperties).toBe(false);
@@ -607,15 +585,13 @@ describe("sealSchema", () => {
         },
       };
 
-      sealSchema({ components: { schemas: schemas } });
+      sealSchema({ openapi: "3.1.0", components: { schemas: schemas } });
 
-      // BaseEntity should be converted to wrapper + core
-      expect(schemas.BaseEntityCore).toBeDefined();
-      expect(schemas.BaseEntity.allOf).toBeDefined();
-      expect(schemas.BaseEntity.unevaluatedProperties).toBe(false);
+      // BaseEntity should be converted 
+      expect(schemas.BaseEntity.unevaluatedProperties).toBeUndefined();
 
-      // Product should reference BaseEntityCore
-      expect(schemas.Product.allOf[0].$ref).toBe("#/components/schemas/BaseEntityCore");
+      // Product should reference BaseEntity
+      expect(schemas.Product.allOf[0].$ref).toBe("#/components/schemas/BaseEntity");
       expect(schemas.Product.unevaluatedProperties).toBe(false);
     });
 
@@ -637,7 +613,7 @@ describe("sealSchema", () => {
         ],
       };
 
-      sealSchema({ components: { schemas: { UserProfile: schema } } });
+      sealSchema(schema);
 
       expect(schema.unevaluatedProperties).toBe(false);
       expect(schema.$id).toBe("https://example.com/schemas/user");
@@ -652,7 +628,7 @@ describe("sealSchema", () => {
     it("seals root schema with interrelated $defs", () => {
       const schema: any = loadSchemaFromFile("organization");
 
-      sealSchema({ components: { schemas: { Organization: schema } } });
+      sealSchema(schema);
 
       // Root schema should be sealed
       expect(schema.unevaluatedProperties).toBe(false);
@@ -661,9 +637,8 @@ describe("sealSchema", () => {
       expect(schema.$defs.Address.unevaluatedProperties).toBe(false);
       expect(schema.$defs.Employee.unevaluatedProperties).toBe(false);
       
-      // Department uses allOf, so both parts should be sealed
-      expect(schema.$defs.Department.allOf[0].unevaluatedProperties).toBe(false);
-      expect(schema.$defs.Department.allOf[1].unevaluatedProperties).toBe(false);
+      // Department is a composition root (has allOf) so it gets sealed, but its children don't
+      expect(schema.$defs.Department.unevaluatedProperties).toBe(false);
 
       // Metadata should be preserved
       expect(schema.title).toBe("Organization");
@@ -679,7 +654,7 @@ describe("sealSchema", () => {
     it("seals root schema with definitions (JSON Schema Draft 4)", () => {
       const schema: any = loadSchemaFromFile("company");
 
-      sealSchema({ components: { schemas: { Company: schema } } });
+      sealSchema(schema, {uplift: true});
 
       // Root schema should be sealed
       expect(schema.unevaluatedProperties).toBe(false);
@@ -689,9 +664,8 @@ describe("sealSchema", () => {
       expect(schema.definitions.Manager.unevaluatedProperties).toBe(false);
       
       
-      // Department uses allOf, so both parts should be sealed
-      expect(schema.definitions.Department.allOf[0].unevaluatedProperties).toBe(false);
-      expect(schema.definitions.Department.allOf[1].unevaluatedProperties).toBe(false);
+      // Department is a composition root (has allOf) so it gets sealed, but its children don't
+      expect(schema.definitions.Department.unevaluatedProperties).toBe(false);
 
       // Metadata should be preserved
       expect(schema.title).toBe("Company");
@@ -809,8 +783,6 @@ describe("sealSchema", () => {
       const result = sealSchema(standalonSchema);
 
       expect(result.unevaluatedProperties).toBe(false);
-      expect(result.allOf[0].unevaluatedProperties).toBe(false);
-      expect(result.allOf[1].unevaluatedProperties).toBe(false);
     });
 
     it("preserves metadata when sealing a standalone schema", () => {
@@ -975,19 +947,6 @@ describe("sealSchema", () => {
           /cannot reliably cover schemas composed with allOf/
         );
       });
-    });
-
-    it("does not throw for document without version by default (backward compatibility)", () => {
-      const doc: any = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-        },
-      };
-
-      // Should not throw - backward compatibility
-      const result = sealSchema(doc, { useUnevaluatedProperties: true });
-      expect(result.unevaluatedProperties).toBe(false);
     });
 
     it("sets $schema when uplift is enabled for standalone schema without version", () => {

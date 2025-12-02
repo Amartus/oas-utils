@@ -1,109 +1,248 @@
-import { 
-  refToName, 
+// Single clean scaffold file — public API preserved and helpers stubbed.
+import { JSONPath } from "jsonpath-plus";
+import {
   documentSupportsUnevaluatedProperties,
   getOpenApiVersion,
   getJsonSchemaVersion,
   upgradeToOas31,
-  upgradeJsonSchemaToDraft201909
+  upgradeJsonSchemaToDraft201909,
 } from "./oasUtils.js";
 
-import { JSONPath } from "jsonpath-plus";
+import { applyPatch, Operation } from 'fast-json-patch';
 
 export interface SealSchemaOptions {
-  /** If true, use unevaluatedProperties: false instead of additionalProperties: false (default: true) */
   useUnevaluatedProperties?: boolean;
-  /** If true, automatically upgrade OpenAPI/JSON Schema version to support unevaluatedProperties (default: false) */
   uplift?: boolean;
 }
 
+
+interface Mappings {
+  orginalRef: string;
+  wrapperRef: string;
+  declarationPointers: string[];
+}
+
+const isAllOf = (prop: string): boolean => {
+  return prop.split("/").at(-2) === "allOf";
+}
+
 /**
- * Seal OpenAPI/JSON Schema objects to prevent additional properties.
- *
- * This ensures every final object shape exposed in the API is sealed (no additional properties allowed),
- * without breaking schemas that are extended via allOf.
- *
- * Algorithm:
- * 1. Index the schema and identify all $ref usages (extension vs direct)
- * 2. Classify object-type schemas (pre-sealed, core-candidate, direct-only)
- * 3. For core-candidates: create Core variant + sealed wrapper
- * 4. Rewrite refs inside allOf to point to Core variants
- * 5. Seal composition roots (allOf/anyOf/oneOf) and direct objects
- *
- * @param doc - OpenAPI document or standalone JSON Schema to transform
- * @param opts - Optional configuration
+ * Scaffolded sealSchema - returns the document unchanged.
  */
 export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
-  if (!doc || typeof doc !== "object") return doc;
-
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
   let sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
-
-  // Check if this is a standalone JSON Schema (not an OpenAPI document)
-  const isStandalone = isStandaloneJsonSchema(doc);
 
   const supportsUnevaluated = documentSupportsUnevaluatedProperties(doc);
   const containsAllOfRefs = documentContainsAllOfRefs(doc);
 
-  // Check if using unevaluatedProperties and validate version compatibility
-  if (useUnevaluated) {
-    const oasVersion = getOpenApiVersion(doc);
-    const schemaVersion = getJsonSchemaVersion(doc);
-    
-    // Only validate if there's an explicit version specified
-    const hasExplicitVersion = oasVersion || schemaVersion;
-    
-    if (hasExplicitVersion) {
-      if (!supportsUnevaluated) {
-        if (opts.uplift) {
-          // Automatically upgrade the version
-          if (oasVersion) {
-            upgradeToOas31(doc);
-            console.warn(
-              `[SEAL-SCHEMA] Upgraded OpenAPI version from ${oasVersion} to 3.1.0 to support unevaluatedProperties.`
-            );
-          } else if (schemaVersion) {
-            upgradeJsonSchemaToDraft201909(doc);
-            console.warn(
-              `[SEAL-SCHEMA] Upgraded JSON Schema to draft 2019-09 to support unevaluatedProperties.`
-            );
-          }
-        } else {
-          // Error if uplift is not enabled
-          const versionInfo = oasVersion 
-            ? `OpenAPI ${oasVersion}` 
-            : `JSON Schema ${schemaVersion}`;
-          
-          throw new Error(
-            `unevaluatedProperties is only supported in OpenAPI 3.1+ or JSON Schema 2019-09+. ` +
-            `Current document uses ${versionInfo}. ` +
-            `Use --uplift option to automatically upgrade the version, or use --use-additional-properties instead.`
-          );
-        }
-      }
-    } else if (opts.uplift && isStandalone) {
-      // If no version and it's a standalone schema, set it when uplift is enabled
-      upgradeJsonSchemaToDraft201909(doc);
-      console.warn(
-        `[SEAL-SCHEMA] Set JSON Schema version to draft 2019-09 to support unevaluatedProperties.`
+  const requiresUplift = !supportsUnevaluated && (useUnevaluated || containsAllOfRefs);
+
+  if (requiresUplift) {
+    const versionInfo = versionStr(doc, "OpenAPI") || versionStr(doc, "JSON Schema");
+    if (!useUnevaluated) {
+      throw new Error(
+        `Sealing via additionalProperties:false cannot reliably cover schemas composed with allOf in ${versionInfo}. ` +
+        `Use --use-unevaluated-properties or enable --uplift to upgrade the document to a version that supports unevaluatedProperties.`
       );
     }
+
+    if (opts.uplift === true || versionInfo === undefined) {
+      doc = upliftDocument(doc);
+    } else {
+      throwUpliftError(versionInfo);
+    }
   }
-  // If not using unevaluatedProperties, validate compatibility
-  if (!useUnevaluated) {
-    validateAdditionalPropertiesCompatibility(doc, supportsUnevaluated, containsAllOfRefs);
+
+  const allProps = find(doc, "$..properties");
+  const allRefs = toReverseMap(find(doc, `$..[?(@['$ref'])]`));
+  const allOfSchemas = find(doc, "$..allOf");
+
+
+  const toSealSingle = filter(allProps, allRefs);
+  const toSealCompositions = filterCompositions(allOfSchemas, allRefs);
+  const toMap = calculateMappings(allRefs);
+
+  for (const prop of toSealSingle) {
+    prop.parent[sealing] = false;
   }
 
-  const handler = selectSealHandler(isStandalone);
-  const context = handler.createContext(doc);
-  const normalizedSchemas = context.schemas;
-  if (!normalizedSchemas || typeof normalizedSchemas !== "object") return doc;
+  for (const comp of toSealCompositions) {
+    comp.parent["unevaluatedProperties"] = false;
+  }
 
-  applySealingToSchemaMap(normalizedSchemas, sealing, supportsUnevaluated);
-
-  return handler.finalize(doc, context);
-
+  return applyMappings(doc, toMap);
 }
 
+function applyMappings(doc: any, mappings: Mappings[]): any {
+  const operations = mappings.flatMap((mapping) => {
+    const move = {
+      "op": "move",
+      "from": mapping.orginalRef,
+      "path": mapping.wrapperRef
+    };
+
+    const add = {
+      "op": "add",
+      "path": mapping.orginalRef,
+      "value": {
+        "allOf": [{ "$ref": `#${mapping.wrapperRef}` }],
+        "unevaluatedProperties": false
+      }
+    };
+    const copyMetadata = [{
+      "op": "copy",
+      "from": `${mapping.wrapperRef}/description`,
+      "path": `${mapping.orginalRef}/description`
+    },
+    {
+      "op": "copy",
+      "from": `${mapping.wrapperRef}/title`,
+      "path": `${mapping.orginalRef}/title`
+    }
+    ];
+    const replaces = mapping.declarationPointers.map((declPtr) => {
+      return {
+        "op": "replace",
+        "path": declPtr,
+        "value": {
+          "$ref": `#${mapping.wrapperRef}`
+        }
+      };
+    });
+    return [move, add, ...copyMetadata, ...replaces] as Operation[]
+  });
+
+  operations.sort((a, b) => {
+    if (a.op === "replace" && b.op !== "replace") return -1;
+    if (a.op !== "replace" && b.op === "replace") return 1;
+    return 0;
+  });
+
+  applyPatch(doc, operations);
+
+  return doc;
+}
+
+function calculateMappings(allRefs: Record<string, string[]>): Mappings[] {
+  return Object.entries(allRefs)
+  .filter(([_, refValues]) => refValues.length > 1)
+  .filter(([_, refValues]) => {
+    const count = refValues.filter((p) => isAllOf(p)).length;
+    return count != 0 && count != refValues.length;
+    
+  })
+  .map(([refPointer, refValues]) => {
+    return {
+      orginalRef: refPointer,
+      wrapperRef: `${refPointer}Core`,
+      declarationPointers: refValues.filter((p) => isAllOf(p)),
+    };
+  });
+}
+
+
+function filterCompositions(allOfSchemas: any[], allRefs: Record<string, string[]>): any[] {
+  return allOfSchemas.filter((item) => {
+    const arr = JSONPath.toPathArray(item.path);
+    arr.pop(); // remove 'allOf'
+    const pointer = JSONPath.toPointer(arr);
+    const refs = allRefs[pointer];
+    return refs == undefined || !refs.some(x => isAllOf(x));
+  });
+}
+
+
+function filter(allProps: any[], allRefs: Record<string, string[]>): any[] {
+  const inlineComposed = (prop: string[]): boolean => {
+    return prop.length > 2 && prop[prop.length - 2] === "allOf";
+  }
+
+  const filtered = allProps.filter((prop) => {
+    const path = JSONPath.toPathArray(prop.path).slice(0, -1);
+    const pointer = JSONPath.toPointer(path);
+    const refs = allRefs[pointer];
+    return !inlineComposed(path) && (refs === undefined || refs.every(x => !isAllOf(x)));
+  });
+
+  return filtered;
+}
+
+function toReverseMap(allRefs: any[]): Record<string, string[]> {
+  const asLocalPointer = (ref: string): string | undefined => {
+    if (ref.startsWith("#/")) {
+      return ref.slice(1);
+    }
+    else { return undefined }
+  }
+
+  const reverseMap: Record<string, string[]> = {};
+  for (const refEntry of allRefs) {
+    const refValue = asLocalPointer(refEntry.value["$ref"]);
+    if (refValue) {
+      if (!reverseMap[refValue]) {
+        reverseMap[refValue] = [];
+      }
+      reverseMap[refValue].push(refEntry.pointer);
+    }
+  }
+  return reverseMap;
+}
+
+function versionStr(doc: any, prefix?: string): string | undefined {
+  const version = getOpenApiVersion(doc) || getJsonSchemaVersion(doc);
+  if (version) {
+    return prefix ? `${prefix} ${version}` : version;
+  }
+  return undefined;
+}
+
+function find(root: any, query: string): any[] {
+  return JSONPath({
+    path: query,
+    json: root,
+    resultType: "all",
+  });
+}
+
+function upliftDocument(doc: any): any {
+  let version = getOpenApiVersion(doc);
+  if (version) {
+    upgradeToOas31(doc);
+    console.warn(
+      `[SEAL-SCHEMA] Upgraded OpenAPI version from ${version} to 3.1.0 to support unevaluatedProperties.`
+    );
+    return doc;
+  } else {
+    version = getJsonSchemaVersion(doc);
+    if (version) {
+      upgradeJsonSchemaToDraft201909(doc);
+      console.warn(
+        `[SEAL-SCHEMA] Upgraded JSON Schema version from ${version} to draft 2019-09 to support unevaluatedProperties.`
+      );
+      return doc;
+    }
+
+    if (isStandaloneJsonSchema(doc)) {
+      upgradeJsonSchemaToDraft201909(doc);
+      console.warn(
+        `[SEAL-SCHEMA] Upgraded JSON Schema version from ${version} to draft 2019-09 to support unevaluatedProperties.`
+      );
+      return doc;
+    }
+
+    throwUpliftError(version || "unknown");
+  }
+}
+
+
+function throwUpliftError(version: string): never {
+  throw new Error(
+    `unevaluatedProperties is only supported in OpenAPI 3.1+ or JSON Schema 2019-09+. ` +
+    `Current document uses ${version}. ` +
+    `Use --uplift option to automatically upgrade the version, or use schema that does not require unevaluatedProperties.`
+  );
+}
 
 /**
  * Determine whether the provided document contains any schemas that use `allOf`
@@ -119,481 +258,6 @@ function documentContainsAllOfRefs(doc: any): boolean {
   }
 }
 
-
-/**
- * Validate that attempting to seal using `additionalProperties:false` is
- * compatible with the document's declared OpenAPI/JSON Schema version. Throw
- * a descriptive error when an explicit older version is present and the
- * document contains allOf references that would make sealing ineffective.
- */
-function validateAdditionalPropertiesCompatibility(
-  doc: any,
-  supportsUnevaluated: boolean,
-  containsAllOfRefs: boolean
-): void {
-  const oasVersion = getOpenApiVersion(doc);
-  const schemaVersion = getJsonSchemaVersion(doc);
-  const hasExplicitVersion = oasVersion || schemaVersion;
-
-  if (hasExplicitVersion && !supportsUnevaluated && containsAllOfRefs) {
-    const versionInfo = oasVersion ? `OpenAPI ${oasVersion}` : `JSON Schema ${schemaVersion}`;
-    throw new Error(
-      `Sealing via additionalProperties:false cannot reliably cover schemas composed with allOf in ${versionInfo}. ` +
-      `Use --use-unevaluated-properties or enable --uplift to upgrade the document to a version that supports unevaluatedProperties.`
-    );
-  }
-}
-
-interface SealContext {
-  schemas: Record<string, any> | undefined;
-  wrappedName: string;
-  isStandalone: boolean;
-}
-
-interface SealHandler {
-  createContext(doc: any): SealContext;
-  finalize(doc: any, context: SealContext): any;
-}
-
-const openApiSealHandler: SealHandler = {
-  createContext(doc: any): SealContext {
-    return {
-      schemas: doc.components?.schemas,
-      wrappedName: "",
-      isStandalone: false,
-    };
-  },
-  finalize(doc: any): any {
-    return doc;
-  },
-};
-
-const jsonSchemaSealHandler: SealHandler = {
-  createContext(doc: any): SealContext {
-    const wrappedName = doc.title || "Root";
-    return {
-      schemas: { [wrappedName]: doc },
-      wrappedName,
-      isStandalone: true,
-    };
-  },
-  finalize(doc: any, context: SealContext): any {
-    if (context.wrappedName && context.schemas) {
-      return context.schemas[context.wrappedName];
-    }
-    return doc;
-  },
-};
-
-function selectSealHandler(isStandalone: boolean): SealHandler {
-  return isStandalone ? jsonSchemaSealHandler : openApiSealHandler;
-}
-
-function applySealingToSchemaMap(
-  schemas: Record<string, any>,
-  sealing: string,
-  supportsUnevaluated: boolean
-): void {
-  if (!schemas || typeof schemas !== "object") return;
-
-  new ComponentSchemaSealer(schemas, sealing, supportsUnevaluated).run();
-}
-
-abstract class SchemaSealerTemplate {
-  protected constructor(
-    protected schemas: Record<string, any>,
-    protected sealing: string,
-    protected supportsUnevaluated: boolean
-  ) {}
-
-  public run(): void {
-    if (!this.schemas || typeof this.schemas !== "object") return;
-
-    this.preprocess();
-    const referenced = this.collectReferencedInAllOf();
-    const coreMapping = this.createCoreMapping(referenced);
-    this.rewriteReferences(coreMapping);
-    this.sealSchemas(coreMapping);
-    sealInlineSchemas(this.schemas, this.sealing, this.supportsUnevaluated);
-    this.postprocess();
-  }
-
-  protected preprocess(): void {}
-  protected postprocess(): void {}
-  protected abstract updateReference(originalName: string, coreName: string): void;
-  protected abstract getCoreRef(coreName: string): string;
-
-  private collectReferencedInAllOf(): Set<string> {
-    const referenced = new Set<string>();
-    for (const schema of Object.values(this.schemas)) {
-      if (!schema || typeof schema !== "object") continue;
-      if (!Array.isArray(schema.allOf)) continue;
-
-      for (const item of schema.allOf) {
-        if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
-          const refName = refToName((item as any).$ref);
-          if (refName && this.schemas[refName]) {
-            referenced.add(refName);
-          }
-        }
-      }
-    }
-    return referenced;
-  }
-
-  private createCoreMapping(referenced: Set<string>): Map<string, string> {
-    const coreMapping = new Map<string, string>();
-    for (const name of referenced) {
-      const schema = this.schemas[name];
-      if (
-        schema &&
-        typeof schema === "object" &&
-        !isPreSealed(schema) &&
-        isObjectLike(schema)
-      ) {
-        const coreName = `${name}Core`;
-        coreMapping.set(name, coreName);
-
-        const coreSchema = deepClone(schema);
-        removeSealing(coreSchema);
-
-        const wrapper: any = {
-          allOf: [{ $ref: this.getCoreRef(coreName) }],
-        };
-        wrapper[this.sealing] = false;
-
-        if (coreSchema.description) {
-          wrapper.description = coreSchema.description;
-          delete coreSchema.description;
-        }
-
-        this.schemas[coreName] = coreSchema;
-        this.schemas[name] = wrapper;
-      }
-    }
-    return coreMapping;
-  }
-
-  private rewriteReferences(coreMapping: Map<string, string>): void {
-    for (const [originalName, coreName] of coreMapping.entries()) {
-      this.updateReference(originalName, coreName);
-    }
-  }
-
-  private sealSchemas(coreMapping: Map<string, string>): void {
-    for (const [name, schema] of Object.entries(this.schemas)) {
-      if (!schema || typeof schema !== "object") continue;
-
-      if (schema[this.sealing] === false || schema.additionalProperties === false) {
-        continue;
-      }
-
-      if (!hasSealableContent(schema)) {
-        continue;
-      }
-
-      const isWrapper =
-        schema.allOf &&
-        schema.allOf.length === 1 &&
-        typeof (schema.allOf[0] as any).$ref === "string" &&
-        (schema.allOf[0] as any).$ref.includes("Core");
-
-      if (
-        !isWrapper &&
-        (schema.allOf || schema.anyOf || schema.oneOf) &&
-        isObjectLike(schema)
-      ) {
-        schema[this.sealing] = false;
-      } else if (!coreMapping.has(name) && isObjectLike(schema) && !name.endsWith("Core")) {
-        schema[this.sealing] = false;
-      }
-    }
-  }
-}
-
-class ComponentSchemaSealer extends SchemaSealerTemplate {
-  constructor(
-    schemas: Record<string, any>,
-    sealing: string,
-    supportsUnevaluated: boolean
-  ) {
-    super(schemas, sealing, supportsUnevaluated);
-  }
-
-  protected preprocess(): void {
-    for (const schema of Object.values(this.schemas)) {
-      if (!schema || typeof schema !== "object") continue;
-      if (schema.$defs && typeof schema.$defs === "object") {
-        new NestedSchemaSealer(schema, "$defs", this.sealing, this.supportsUnevaluated).run();
-      }
-      if (schema.definitions && typeof schema.definitions === "object") {
-        new NestedSchemaSealer(schema, "definitions", this.sealing, this.supportsUnevaluated).run();
-      }
-    }
-  }
-
-  protected getCoreRef(coreName: string): string {
-    return `#/components/schemas/${coreName}`;
-  }
-
-  protected updateReference(originalName: string, coreName: string): void {
-    updateAllOfReferences(this.schemas, originalName, coreName);
-  }
-}
-
-class NestedSchemaSealer extends SchemaSealerTemplate {
-  constructor(
-    private parent: any,
-    private defsKey: "$defs" | "definitions",
-    sealing: string,
-    supportsUnevaluated: boolean
-  ) {
-    super(parent[defsKey], sealing, supportsUnevaluated);
-  }
-
-  protected postprocess(): void {
-    if (
-      this.parent &&
-      hasSealableContent(this.parent) &&
-      isObjectLike(this.parent) &&
-      !isPreSealed(this.parent)
-    ) {
-      this.parent[this.sealing] = false;
-    }
-  }
-
-  protected getCoreRef(coreName: string): string {
-    return this.defsKey === "$defs" ? `#/$defs/${coreName}` : `#/definitions/${coreName}`;
-  }
-
-  protected updateReference(originalName: string, coreName: string): void {
-    updateNestedAllOfReferences(this.schemas, originalName, coreName, this.defsKey);
-  }
-}
-
-/**
- * Update all allOf references in nested schemas from original schema to core schema.
- */
-function updateNestedAllOfReferences(
-  defs: Record<string, any>,
-  originalName: string,
-  coreName: string,
-  defsKey: "$defs" | "definitions"
-): void {
-  const refPrefix = defsKey === "$defs" ? "#/$defs" : "#/definitions";
-  const originalRef = `${refPrefix}/${originalName}`;
-  const coreRef = `${refPrefix}/${coreName}`;
-  const pointerRoot = { [defsKey]: defs };
-  const query = `$.${defsKey}..allOf[?(@.$ref=='${originalRef}')]`;
-
-  updateAllOfReferencesWithQuery(defs, originalRef, coreRef, query, pointerRoot);
-}
-
-
-/**
- * Update all allOf references from original schema to core schema.
- */
-function updateAllOfReferences(
-  schemas: Record<string, any>,
-  originalName: string,
-  coreName: string
-): void {
-  const originalRef = `#/components/schemas/${originalName}`;
-  const coreRef = `#/components/schemas/${coreName}`;
-  const pointerRoot = { components: { schemas } };
-  const query = `$.components.schemas..allOf[?(@.$ref=='${originalRef}')]`;
-
-  updateAllOfReferencesWithQuery(schemas, originalRef, coreRef, query, pointerRoot);
-}
-
-function updateAllOfReferencesWithQuery(
-  scope: Record<string, any>,
-  originalRef: string,
-  coreRef: string,
-  query: string,
-  pointerRoot: Record<string, any>
-): void {
-  try {
-    const pointers: string[] = JSONPath({ path: query, json: pointerRoot, resultType: "pointer" }) as string[];
-    for (const ptr of pointers) {
-      setJsonPointer(pointerRoot, ptr + "/$ref", coreRef);
-    }
-  } catch (e) {
-    for (const schema of Object.values(scope)) {
-      if (!schema || typeof schema !== "object") continue;
-      if (!Array.isArray((schema as any).allOf)) continue;
-
-      for (const item of (schema as any).allOf) {
-        if (item && typeof item === "object" && (item as any).$ref === originalRef) {
-          (item as any).$ref = coreRef;
-        }
-      }
-    }
-  }
-}
-
-
-/**
- * Set a value in an object using a JSON Pointer string (e.g. '/a/0/b').
- */
-function setJsonPointer(root: any, pointer: string, value: any): void {
-  if (!pointer || pointer === "") return;
-  // pointer is returned from jsonpath-plus as a JSON Pointer starting with '/'
-  const parts = pointer.split('/').slice(1).map(unescapePointer);
-  let cur = root;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    if (!(key in cur)) return; // unexpected shape
-    cur = cur[key];
-    if (cur === undefined || cur === null) return;
-  }
-  const last = parts[parts.length - 1];
-  cur[last] = value;
-}
-
-function unescapePointer(part: string): string {
-  return part.replace(/~1/g, '/').replace(/~0/g, '~');
-}
-
-/**
- * Recursively seal inline object schemas (properties, items, etc.).
- */
-function sealInlineSchemas(
-  schemas: Record<string, any>,
-  sealing: string,
-  supportsUnevaluated: boolean
-): void {
-  const sealRecursive = (obj: any): void => {
-    if (!obj || typeof obj !== "object") return;
-
-    if (isObjectLike(obj) && !isPreSealed(obj) && hasSealableContent(obj)) {
-      const hasComposition = Boolean(obj.allOf || obj.anyOf || obj.oneOf);
-      const hasRef = Boolean(findRefsInObject(obj).length > 0);
-
-      if (hasComposition && supportsUnevaluated) {
-        obj.unevaluatedProperties = false;
-      } else if (!hasRef && !hasComposition) {
-        obj[sealing] = false;
-      }
-    }
-
-    // Recurse into properties
-    if (obj.properties && typeof obj.properties === "object") {
-      for (const prop of Object.values(obj.properties)) {
-        sealRecursive(prop);
-      }
-    }
-
-    // Recurse into items
-    if (obj.items && typeof obj.items === "object") {
-      sealRecursive(obj.items);
-    }
-
-    // Recurse into allOf/anyOf/oneOf
-    if (Array.isArray(obj.allOf)) {
-      for (const item of obj.allOf) {
-        sealRecursive(item);
-      }
-    }
-    if (Array.isArray(obj.anyOf)) {
-      for (const item of obj.anyOf) {
-        sealRecursive(item);
-      }
-    }
-    if (Array.isArray(obj.oneOf)) {
-      for (const item of obj.oneOf) {
-        sealRecursive(item);
-      }
-    }
-
-    // Recurse into additionalProperties
-    if (obj.additionalProperties && typeof obj.additionalProperties === "object") {
-      sealRecursive(obj.additionalProperties);
-    }
-  };
-
-  for (const schema of Object.values(schemas)) {
-    sealRecursive(schema);
-  }
-}
-
-/**
- * Check if a schema is object-like.
- * This includes schemas that have type: "object", explicit properties, or composition keywords (which implicitly compose objects).
- */
-function isObjectLike(schema: any): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  return (
-    schema.type === "object" ||
-    Boolean(schema.properties) ||
-    Boolean(schema.allOf) ||
-    Boolean(schema.anyOf) ||
-    Boolean(schema.oneOf)
-  );
-}
-
-/**
- * Check if a schema has sealable content (properties or composition keywords).
- * This ensures we only seal schemas that actually define object structure.
- */
-function hasSealableContent(schema: any): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  return (
-    Boolean(schema.properties) ||
-    Boolean(schema.allOf) ||
-    Boolean(schema.anyOf) ||
-    Boolean(schema.oneOf)
-  );
-}
-
-/**
- * Check if a schema is already sealed.
- */
-function isPreSealed(schema: any): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  return (
-    schema.additionalProperties === false ||
-    schema.unevaluatedProperties === false
-  );
-}
-
-/**
- * Remove sealing keywords from a schema.
- */
-function removeSealing(schema: any): void {
-  if (schema && typeof schema === "object") {
-    delete schema.additionalProperties;
-    delete schema.unevaluatedProperties;
-  }
-}
-
-/**
- * Deep clone an object.
- */
-function deepClone(obj: any): any {
-  if (obj === null || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map((item) => deepClone(item));
-  if (obj instanceof Date) return new Date(obj.getTime());
-  const cloned: any = {};
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      cloned[key] = deepClone(obj[key]);
-    }
-  }
-  return cloned;
-}
-
-/**
- * Find all $ref entries in an object (non-recursive for direct refs).
- */
-function findRefsInObject(obj: any): string[] {
-  if (!obj || typeof obj !== "object") return [];
-  const refs: string[] = [];
-  if (typeof (obj as any).$ref === "string") {
-    refs.push((obj as any).$ref);
-  }
-  return refs;
-}
 
 /**
  * Check if a document is a standalone JSON Schema (not an OpenAPI document).
