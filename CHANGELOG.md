@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8] - 2025-12-02
+### Changed
+- Reimplemented seal functionality
+- Test alignment with new implementation 
+### Added
+- Extra test for seal functionality
+
 ## [0.3.7] - 2025-11-28
 ### Changed
 - Fixed OAS with discriminator cleanup
@@ -35,3 +42,4 @@
 
 ### Fixed
 - Ensured sealing logic reuses JSONPath to detect `allOf` references across the document, preventing unsafe additional-properties sealing on older drafts.
+
