@@ -126,11 +126,11 @@ export function loadSchemasFromFiles(
   return schemas;
 }
 
-/**
- * Delete a property identified by a JSON Pointer string from the given object.
- * Uses json-p3's JSONPointer helper to resolve the parent and remove the property.
- */
-import { applyPatch, Operation } from 'fast-json-patch';
+
+import jsonPatch from 'fast-json-patch';
+import type { Operation } from 'fast-json-patch';
+
+const { applyPatch } = jsonPatch;
 
 
 export function deleteByPointer(root: any, pointer: string): void {

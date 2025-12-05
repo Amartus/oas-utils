@@ -8,7 +8,12 @@ import {
   upgradeJsonSchemaToDraft201909,
 } from "./oasUtils.js";
 
-import { applyPatch, Operation } from 'fast-json-patch';
+
+import jsonPatch from 'fast-json-patch';
+import type { Operation } from 'fast-json-patch';
+
+const { applyPatch } = jsonPatch;
+
 
 export interface SealSchemaOptions {
   useUnevaluatedProperties?: boolean;
