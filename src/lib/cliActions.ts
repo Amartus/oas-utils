@@ -10,6 +10,7 @@ import {
 import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
 import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
+import { removeDanglingRefs } from "./removeDanglingRefs.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -258,6 +259,24 @@ export async function runCleanupDiscriminators(
     }
   } else {
     console.error("[INFO] No schemas with discriminators found.");
+  }
+
+  await writeOutput(doc, opts.output, format);
+}
+
+export async function runRemoveDangling(
+  opts: { output?: string; aggressive?: boolean },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const doc = parseYamlOrJson(await reader());
+
+  const result = removeDanglingRefs(doc, { aggressive: Boolean(opts.aggressive) });
+
+  if (result.removed > 0) {
+    console.error(`[REMOVE-DANGLING] Removed ${result.removed} dangling $ref(s).`);
+  } else {
+    console.error(`[INFO] No dangling $ref entries found.`);
   }
 
   await writeOutput(doc, opts.output, format);
