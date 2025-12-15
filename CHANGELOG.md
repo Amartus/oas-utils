@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2025-12-15
+### Added
+- Introduced `removeDanglingRefs` (and the `remove-dangling-refs` decorator) so you can drop `$ref`s that point to deleted component schemas during programmatic runs or Redocly bundling.
+### Changed
+- `removeUnusedSchemas` now builds and reuses an `allOf` reverse map, iterating until the used set stabilizes while honoring `--ignore-parents`, plus the helper now shares a single transitive reference collector.
+
 ## [0.3.8] - 2025-12-02
 ### Changed
 - Reimplemented seal functionality

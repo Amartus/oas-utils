@@ -224,8 +224,6 @@ export async function runSealSchema(
 
   const result = sealSchema(doc, sopts);
 
-  const sealingKeyword = sopts.useUnevaluatedProperties ? "unevaluatedProperties" : "additionalProperties";
-
   await writeOutput(result, opts.output, format);
 }
 

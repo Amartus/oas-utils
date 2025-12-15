@@ -76,16 +76,6 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
 
   // 2) Follow transitive references among schemas (downward closure via $ref in schema bodies)
 
-  const collectRefsInSchema = (schema: any, add: (name: string) => void) => {
-    if (!schema || typeof schema !== "object") return;
-    const refs = JSONPath({ path: "$..$ref", json: schema, resultType: "value" }) as string[];
-    if (!Array.isArray(refs)) return;
-    for (const refStr of refs) {
-      const maybe = refToName(refStr);
-      if (maybe) add(maybe);
-    }
-  };
-
   while (queue.length) {
     const name = queue.pop()!;
     const schema = schemas[name];
@@ -98,13 +88,45 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     });
   }
 
-  // 3) Special rule: if a schema has an allOf that references any used schema, it is also considered used.
-  // Implement as an upward closure using a reverse map from base->composers. Find allOf anywhere inside the schema.
+
+  // 3) Promote schemas via allOf relationships (upward closure via allOf)
+  const ignoreParentsSet = new Set((opts.ignoreParents ?? []).map(String));
+  const reverseAllOf = buildAllOfReverseMap(schemas);
+  while (true) {
+    const beforeCount = used.size;
+    promoteSchemasViaAllOfOnce(schemas, used, reverseAllOf, ignoreParentsSet);
+    if (used.size === beforeCount) break;
+  }
+
+
+  // 4) Remove unused schemas unless explicitly kept
+  for (const name of Object.keys(schemas)) {
+    if (keepSet.has(name)) continue;
+    if (!used.has(name)) delete schemas[name];
+  }
+
+  if (opts.aggressive && doc.components) {
+    pruneUnusedComponents(doc, usedComponents);
+  }
+
+  return doc;
+}
+
+function collectRefsInSchema(schema: any, add: (name: string) => void) {
+  if (!schema || typeof schema !== "object") return;
+  const refs = JSONPath({ path: "$..$ref", json: schema, resultType: "value" }) as string[];
+  if (!Array.isArray(refs)) return;
+  for (const refStr of refs) {
+    const maybe = refToName(refStr);
+    if (maybe) add(maybe);
+  }
+}
+
+function buildAllOfReverseMap(schemas: Record<string, any>) {
   const reverseAllOf = new Map<string, Set<string>>();
   const collectAllOfRefs = (node: any, add: (refName: string) => void) => {
     if (!node || typeof node !== "object") return;
-    if (Array.isArray(node))
-      return node.forEach((x) => collectAllOfRefs(x, add));
+    if (Array.isArray(node)) return node.forEach((x) => collectAllOfRefs(x, add));
     if (Array.isArray((node as any).allOf)) {
       for (const part of (node as any).allOf as any[]) {
         if (
@@ -127,14 +149,22 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     });
   }
 
-  // Only promote via allOf if the "parent" is already referenced (in used set)
-  const ignoreParentsSet = new Set((opts.ignoreParents ?? []).map(String));
+  return reverseAllOf;
+}
+
+function promoteSchemasViaAllOfOnce(
+  schemas: Record<string, any>,
+  used: Set<string>,
+  reverseAllOf: Map<string, Set<string>>,
+  ignoreParentsSet: Set<string>
+) {
   const upQueue: string[] = Array.from(used);
   const promoted = new Set<string>();
+
   while (upQueue.length) {
     const base = upQueue.pop()!;
-    if (!used.has(base)) continue; // Only promote if parent is referenced
-    if (ignoreParentsSet.has(base)) continue; // Do not promote children via ignored parents
+    if (!used.has(base)) continue;
+    if (ignoreParentsSet.has(base)) continue;
     const parents = reverseAllOf.get(base);
     if (!parents) continue;
     for (const parent of parents) {
@@ -146,7 +176,6 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     }
   }
 
-  // After promoting via allOf, include their transitive refs as well.
   const queue2: string[] = Array.from(promoted);
   while (queue2.length) {
     const name = queue2.pop()!;
@@ -160,17 +189,7 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     });
   }
 
-  // 4) Remove unused schemas unless explicitly kept
-  for (const name of Object.keys(schemas)) {
-    if (keepSet.has(name)) continue;
-    if (!used.has(name)) delete schemas[name];
-  }
-
-  if (opts.aggressive && doc.components) {
-    pruneUnusedComponents(doc, usedComponents);
-  }
-
-  return doc;
+  return used;
 }
 
 function pruneUnusedComponents(

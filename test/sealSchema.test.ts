@@ -205,6 +205,40 @@ describe("sealSchema", () => {
     });
 
 
+    it("seals schemas used in mixed allOf compositions", () => {
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            Shared: {
+              type: "object",
+              properties: { id: { type: "string" } },
+            },
+            AllOfOnly: {
+              allOf: [{ $ref: "#/components/schemas/Shared" }],
+            },
+            InlineAllOf: {
+              allOf: [
+                { $ref: "#/components/schemas/Shared" },
+                {
+                  type: "object",
+                  properties: {
+                    extra: { type: "string" },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      sealSchema(doc, { useUnevaluatedProperties: false });
+      expect(doc.components.schemas.Shared.additionalProperties).toBeUndefined();
+      expect(doc.components.schemas.AllOfOnly.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.InlineAllOf.unevaluatedProperties).toBe(false);
+    });
+
+
     it("no additionalProperties at the allOf level", () => {
       const doc: any = {
         $schema: "https://json-schema.org/draft/2019-09/schema",

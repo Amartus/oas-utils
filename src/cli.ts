@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { Command } from "commander";
 import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators } from "./lib/cliActions.js";
 import YAML from "yaml";
-
+import {dropNulls} from "./lib/utils.js";
 
 const program = new Command();
 program
@@ -229,8 +229,8 @@ async function reader(input: string | undefined): Promise<string> {
   return readStdin();
 }
 
-
 function format(doc: any, target?: string) {
   const isJson = target?.endsWith(".json");
-  return isJson ? JSON.stringify(doc, null, 2) + "\n" : YAML.stringify(doc);
+  const cleanedDoc = dropNulls(doc) ?? {};
+  return isJson ? JSON.stringify(cleanedDoc, null, 2) + "\n" : YAML.stringify(cleanedDoc);
 }

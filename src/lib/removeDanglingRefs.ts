@@ -4,6 +4,7 @@ import { refToName } from './oasUtils.js';
 export interface RemoveDanglingOptions {
   /** If true, remove external refs (not just components) */
   aggressive?: boolean;
+  keepExternal?: boolean;
 }
 
 /**
@@ -23,15 +24,14 @@ export function removeDanglingRefs(doc: any, opts: RemoveDanglingOptions = {}): 
 
   // Build set of dangling ref strings. By default only refs that point to component schemas
   // are considered; with aggressive=true we also treat external / non-components refs as dangling.
-  const allRefValues = JSONPath({ path: '$..$ref', json: doc, resultType: 'value' }) as string[];
   const danglingRefs = new Set<string>();
-  for (const refStr of allRefValues ?? []) {
-    const name = refToName(refStr);
+  for (const r of refs ?? []) {
+    const name = refToName(r.value);
     if (name) {
-      if (!existing.has(name)) danglingRefs.add(refStr);
+      if (!existing.has(name)) danglingRefs.add(r.value);
     } else if (opts.aggressive) {
       // treat non-local refs as dangling in aggressive mode
-      danglingRefs.add(refStr);
+      danglingRefs.add(r.value);
     }
   }
 

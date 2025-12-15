@@ -1,6 +1,6 @@
 # oas-utils
 
-Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, convert allOf + discriminator patterns to oneOf + discriminator, and clean up discriminator mappings. Use them as a CLI or as Redocly decorators.
+Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, convert allOf + discriminator patterns to oneOf + discriminator, clean up discriminator mappings, and remove dangling `$ref` targets. Use them as a CLI or as Redocly decorators.
 
 ## Definition of "unused schema"
 
@@ -202,6 +202,9 @@ decorators:
   # Clean up discriminator mappings
   oas-utils/cleanup-discriminators: {}
 
+  # Remove dangling $ref entries that point to missing component schemas
+  oas-utils/remove-dangling-refs: {}
+
   # Seal object schemas
   oas-utils/seal-schema:
     useUnevaluatedProperties: true
@@ -210,13 +213,21 @@ decorators:
 
 3) Run bundling with Redocly CLI and the decorators will apply the transformations. With `aggressive: true`, unused non-schema components (responses, headers, requestBodies, etc.) are removed as well.
 
+The `remove-dangling-refs` decorator mirrors `removeDanglingRefs`, dropping `$ref`s whose targets are missing so bundling ends up free of dangling references.
+
 Notes:
 - Preferred plugin id is `oas-utils`. Old aliases `oas-remove-unused/remove-unused-schemas` and `oas-remove-unused/remove-from-oneof` still work.
 
 ## Programmatic usage
 
 ```
-import { removeUnusedSchemas, allOfToOneOf, sealSchema, cleanupDiscriminatorMappings } from 'oas-utils';
+import {
+  cleanupDiscriminatorMappings,
+  removeDanglingRefs,
+  removeUnusedSchemas,
+  allOfToOneOf,
+  sealSchema,
+} from 'oas-utils';
 
 // Remove unused schemas
 removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
@@ -230,6 +241,10 @@ console.log(`Removed ${result.mappingsRemoved} invalid mappings from ${result.sc
 
 // Seal object schemas
 sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
+
+// Remove dangling refs (aggressive mode prunes external URIs too)
+const dangling = removeDanglingRefs(doc, { aggressive: true });
+console.log(`Removed ${dangling.removed} dangling $ref(s)`);
 ```
 
 ## Notes
