@@ -263,3 +263,26 @@ npm run test
 ```
 
 Fixture files live under `test/resources` as `<name>.input.yaml`, `<name>.expected.yaml`, with optional `<name>.options.json` to pass core options like `{ "keep": ["Foo"], "aggressive": true }`.
+
+### Development run
+
+For rapid development and testing, use the dev script to run the CLI with auto-reload:
+
+```
+npm run dev <command> <input.yaml> [options]
+```
+
+Examples:
+
+```
+# Test remove-unused with auto-reload on code changes
+npm run dev remove-unused examples/petstore.yaml -o output.yaml --keep CommonError
+
+# Test allof-to-oneof transformation
+npm run dev allof-to-oneof examples/polymorphic-minimal.yaml -o output.yaml
+
+# Test seal-schema with uplift
+npm run dev seal-schema examples/petstore.yaml -o output.yaml --uplift
+```
+
+The dev script uses `tsx watch` to automatically restart the CLI when source files change, making it easy to test your changes without rebuilding.
