@@ -1,0 +1,70 @@
+openapi: 3.0.0
+info:
+  title: Test Merge Nested OneOf
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimalPolymorphic"
+components:
+  schemas:
+    AnimalPolymorphic:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Horse"
+        - $ref: "#/components/schemas/Bear"
+        - $ref: "#/components/schemas/Bird"
+      discriminator:
+        propertyName: "@type"
+        mapping:
+          Animal: "#/components/schemas/Animal"
+          Cat: "#/components/schemas/Cat"
+          Dog: "#/components/schemas/Dog"
+          Horse: "#/components/schemas/Horse"
+          Bear: "#/components/schemas/Bear"
+          Bird: "#/components/schemas/Bird"
+    MammalPolymorphic:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Horse"
+        - $ref: "#/components/schemas/Bear"
+      discriminator:
+        propertyName: "@type"
+        mapping:
+          Cat: "#/components/schemas/Cat"
+          Dog: "#/components/schemas/Dog"
+          Horse: "#/components/schemas/Horse"
+          Bear: "#/components/schemas/Bear"
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Horse:
+      type: object
+      properties:
+        name:
+          type: string
+    Bird:
+      type: object
+      properties:
+        name:
+          type: string
+    Bear:
+      type: object
+      properties:
+        name:
+          type: string

@@ -1,4 +1,54 @@
 import { refToName, buildInheritanceGraph } from "./oasUtils.js";
+import { collectMatching } from "./schemaTransformUtils.js";
+
+/**
+ * Check if a schema reference is used anywhere in the document outside of allOf arrays.
+ * Returns true if the schema is referenced in paths, operations, or components (excluding allOf inheritance).
+ */
+function isSchemaReferencedOutsideAllOf(doc: any, schemaRef: string): boolean {
+  // Check paths and webhooks (no allOf filtering needed here)
+  if (collectMatching(doc.paths, (node) => node?.$ref === schemaRef).length > 0) {
+    return true;
+  }
+  if (collectMatching(doc.webhooks, (node) => node?.$ref === schemaRef).length > 0) {
+    return true;
+  }
+
+  // Check components (excluding schemas which need special handling)
+  const components = doc.components;
+  if (components) {
+    const nonSchemaComponents = {
+      requestBodies: components.requestBodies,
+      responses: components.responses,
+      parameters: components.parameters,
+      callbacks: components.callbacks,
+      links: components.links,
+      headers: components.headers
+    };
+    
+    if (collectMatching(nonSchemaComponents, (node) => node?.$ref === schemaRef).length > 0) {
+      return true;
+    }
+
+    // Check schemas but exclude direct allOf references
+    const schemas = components.schemas;
+    if (schemas && typeof schemas === "object") {
+      for (const schema of Object.values(schemas)) {
+        if (schema && typeof schema === "object") {
+          // Create a copy of schema without the allOf array to search
+          const { allOf, ...schemaWithoutAllOf } = schema as any;
+          
+          // Search in everything except the direct allOf references
+          if (collectMatching(schemaWithoutAllOf, (node) => node?.$ref === schemaRef).length > 0) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 
 export interface AllOfToOneOfOptions {
@@ -6,6 +56,8 @@ export interface AllOfToOneOfOptions {
   addDiscriminatorConst?: boolean;
   /** If true, skip oneOf transformation if only one specialization is found (default: false) */
   ignoreSingleSpecialization?: boolean;
+  /** If true, merge nested oneOf schemas by inlining references to schemas that only contain oneOf (default: false) */
+  mergeNestedOneOf?: boolean;
 }
 
 /**
@@ -90,9 +142,23 @@ export function allOfToOneOf(doc: any, opts: AllOfToOneOfOptions = {}): any {
 
   // Step 5: Replace references to base schemas with wrapper schemas where polymorphism is used
   // Preserve direct inheritance (allOf) references but rewrite everything else
+  // Also track if base schema is actually used anywhere
+  const wrappersToRemove = new Set<string>();
+  const baseNamesWithoutWrappers = new Set<string>();
+  
   for (const [baseName, wrapperInfo] of polymorphicWrappers.entries()) {
     const baseRef = `#/components/schemas/${baseName}`;
     const wrapperRef = `#/components/schemas/${wrapperInfo.name}`;
+
+    // Check if base schema is used anywhere outside of allOf inheritance
+    const isBaseUsed = isSchemaReferencedOutsideAllOf(doc, baseRef);
+    
+    if (!isBaseUsed) {
+      // Base schema is not used in API - mark wrapper for removal
+      wrappersToRemove.add(wrapperInfo.name);
+      baseNamesWithoutWrappers.add(baseName);
+      continue;
+    }
 
     // In components.schemas we must keep allOf inheritance pointing at the base,
     // but other usages (e.g. Human.pets, Pack.members) should point to the wrapper.
@@ -115,6 +181,16 @@ export function allOfToOneOf(doc: any, opts: AllOfToOneOfOptions = {}): any {
     }
   }
 
+  // Remove polymorphic wrappers that have no clients
+  for (const wrapperName of wrappersToRemove) {
+    delete schemas[wrapperName];
+  }
+  
+  // Remove from tracking map as well
+  for (const baseName of baseNamesWithoutWrappers) {
+    polymorphicWrappers.delete(baseName);
+  }
+
   // Step 5b: Chain polymorphic wrappers.
   // If a wrapper's oneOf entry points at another polymorphic base, redirect it to that base's wrapper
   // so that top-level polymorphic wrappers expose nested polymorphic wrappers instead of raw bases.
@@ -135,6 +211,13 @@ export function allOfToOneOf(doc: any, opts: AllOfToOneOfOptions = {}): any {
         return { $ref: `#/components/schemas/${nested.name}` };
       });
     }
+  }
+
+  // Step 5c: Optionally merge nested oneOf schemas
+  // If a oneOf references a schema that only contains oneOf (no other properties),
+  // inline the referenced oneOf items into the parent oneOf
+  if (opts.mergeNestedOneOf) {
+    mergeNestedOneOfSchemas(schemas);
   }
 
   // Step 6: Always remove discriminator from base schemas that were converted
@@ -280,4 +363,114 @@ function addDiscriminatorConstToConcreteSchemas(
       }
     }
   }
+}
+
+/**
+ * Merge nested oneOf schemas by inlining references to schemas that only contain oneOf.
+ * This optimizes cases where a oneOf references another schema that is purely a oneOf wrapper.
+ * 
+ * @param schemas - All schemas in the document
+ */
+function mergeNestedOneOfSchemas(schemas: Record<string, any>): void {
+  if (!schemas || typeof schemas !== "object") return;
+
+  // Identify schemas that are "simple oneOf wrappers" (only have oneOf, discriminator, description)
+  const simpleOneOfSchemas = new Set<string>();
+  
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (isSimpleOneOfSchema(schema)) {
+      simpleOneOfSchemas.add(name);
+    }
+  }
+
+  if (simpleOneOfSchemas.size === 0) return;
+
+  // Process each schema that has oneOf
+  for (const schema of Object.values(schemas)) {
+    if (!schema || typeof schema !== "object" || !Array.isArray(schema.oneOf)) {
+      continue;
+    }
+
+    let modified = false;
+    const newOneOf: any[] = [];
+    const mergedMappings: Record<string, string> = {};
+
+    // Check each oneOf entry
+    for (const entry of schema.oneOf) {
+      if (!entry || typeof entry !== "object" || typeof entry.$ref !== "string") {
+        newOneOf.push(entry);
+        continue;
+      }
+
+      const refName = refToName(entry.$ref);
+      if (!refName || !simpleOneOfSchemas.has(refName)) {
+        newOneOf.push(entry);
+        continue;
+      }
+
+      // This references a simple oneOf schema - inline it
+      const referencedSchema = schemas[refName];
+      if (referencedSchema && Array.isArray(referencedSchema.oneOf)) {
+        // Add all items from the referenced oneOf
+        newOneOf.push(...referencedSchema.oneOf);
+        
+        // Merge discriminator mappings
+        if (referencedSchema.discriminator?.mapping) {
+          Object.assign(mergedMappings, referencedSchema.discriminator.mapping);
+        }
+        
+        modified = true;
+      } else {
+        newOneOf.push(entry);
+      }
+    }
+
+    if (modified) {
+      // Remove duplicates from oneOf (same $ref)
+      const seen = new Set<string>();
+      schema.oneOf = newOneOf.filter((entry: any) => {
+        if (!entry?.$ref) return true;
+        if (seen.has(entry.$ref)) return false;
+        seen.add(entry.$ref);
+        return true;
+      });
+
+      // Merge discriminator mappings
+      if (Object.keys(mergedMappings).length > 0) {
+        if (!schema.discriminator) {
+          schema.discriminator = { propertyName: "type", mapping: {} };
+        }
+        if (!schema.discriminator.mapping) {
+          schema.discriminator.mapping = {};
+        }
+        Object.assign(schema.discriminator.mapping, mergedMappings);
+      }
+    }
+  }
+}
+
+/**
+ * Check if a schema is a "simple oneOf wrapper" - only contains oneOf and optionally discriminator/description.
+ * These schemas are candidates for inlining.
+ */
+function isSimpleOneOfSchema(schema: any): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  if (!Array.isArray(schema.oneOf) || schema.oneOf.length === 0) return false;
+
+  // Check that schema ONLY has oneOf, discriminator, and/or description
+  const allowedKeys = new Set(['oneOf', 'discriminator', 'description']);
+  const schemaKeys = Object.keys(schema);
+  
+  for (const key of schemaKeys) {
+    if (!allowedKeys.has(key)) {
+      return false;
+    }
+  }
+
+  // Must not have allOf, properties, or other schema-defining properties
+  if (schema.allOf || schema.properties || schema.type || schema.anyOf) {
+    return false;
+  }
+
+  return true;
 }

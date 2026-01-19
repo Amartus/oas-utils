@@ -1,6 +1,45 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 import { allOfToOneOf } from "../src/lib/allOfToOneOf.js";
 import { testSchemas, withProperties } from "./schemaLoader.js";
+
+async function loadYaml(file: string): Promise<any> {
+  const raw = await fs.readFile(file, "utf8");
+  return YAML.parse(raw);
+}
+
+function deepClone<T>(x: T): T {
+  return JSON.parse(JSON.stringify(x));
+}
+
+describe("allOfToOneOf (file-based tests)", () => {
+  const cases = [
+    "foo-fvo-res",
+    "merge-nested-oneof",
+  ];
+
+  for (const name of cases) {
+    it(name, async () => {
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const base = path.resolve(__dirname, "resources", `${name}`);
+      const inputPath = base + ".input.yaml";
+      const expectedPath = base + ".expected.yaml";
+      const input = await loadYaml(inputPath);
+      const expected = await loadYaml(expectedPath);
+      // optional options file
+      let options: any = undefined;
+      try {
+        const optsRaw = await fs.readFile(base + ".options.json", "utf8");
+        options = JSON.parse(optsRaw);
+      } catch {}
+      const actual = allOfToOneOf(deepClone(input), options);
+      expect(actual).toEqual(expected);
+    });
+  }
+});
 
 describe("allOfToOneOf", () => {
   it("converts allOf + discriminator to oneOf + discriminator with const properties", () => {
@@ -66,6 +105,22 @@ describe("allOfToOneOf", () => {
 
   it("removes discriminator from base schema after conversion", () => {
     const doc: any = {
+      paths: {
+        "/test": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Animal" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       components: {
         schemas: {
           Animal: testSchemas.animalWithDiscriminator({
@@ -121,6 +176,30 @@ describe("allOfToOneOf", () => {
 
   it("handles multiple polymorphic base schemas", () => {
     const doc: any = {
+      paths: {
+        "/test": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Animal" }
+                  }
+                }
+              },
+              "201": {
+                description: "created",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Vehicle" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       components: {
         schemas: {
           Animal: testSchemas.animalWithDiscriminator({
@@ -443,6 +522,22 @@ describe("allOfToOneOf", () => {
 
   it("transforms with single specialization when ignoreSingleSpecialization=false (default)", () => {
     const doc: any = {
+      paths: {
+        "/test": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Vehicle" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       components: {
         schemas: {
           Vehicle: testSchemas.vehicleWithDiscriminator({
@@ -466,6 +561,22 @@ describe("allOfToOneOf", () => {
 
   it("handles multi-level inheritance without duplicating const constraints", () => {
     const doc: any = {
+      paths: {
+        "/test": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Animal" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       components: {
         schemas: {
           // Base schema with discriminator
@@ -673,5 +784,198 @@ describe("allOfToOneOf", () => {
     expect(
       result.paths["/byLeaf"].get.responses["200"].content["application/json"].schema.$ref
     ).toBe("#/components/schemas/Cat");
+  });
+
+  it("merges nested oneOf when mergeNestedOneOf option is enabled", () => {
+    const doc: any = {
+      openapi: "3.0.0",
+      paths: {
+        "/products": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Product" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "/subproducts": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/SubProduct" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          Product: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeA: "#/components/schemas/TypeA",
+                TypeB: "#/components/schemas/TypeB"
+              }
+            }
+          },
+          TypeA: { allOf: [{ $ref: "#/components/schemas/Product" }] },
+          TypeB: { allOf: [{ $ref: "#/components/schemas/Product" }] },
+          SubProduct: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeC: "#/components/schemas/TypeC",
+                TypeD: "#/components/schemas/TypeD"
+              }
+            }
+          },
+          TypeC: { allOf: [{ $ref: "#/components/schemas/SubProduct" }] },
+          TypeD: { allOf: [{ $ref: "#/components/schemas/SubProduct" }] }
+        }
+      }
+    };
+
+    const result = allOfToOneOf(doc, { mergeNestedOneOf: true });
+
+    // Check that ProductPolymorphic and SubProductPolymorphic were created
+    expect(result.components.schemas.ProductPolymorphic).toBeDefined();
+    expect(result.components.schemas.SubProductPolymorphic).toBeDefined();
+
+    // SubProductPolymorphic is a simple oneOf wrapper, so it should be inlined
+    // when referenced by ProductPolymorphic if Product referenced it
+    // But in this case they're independent, so no merging happens
+    
+    const productOneOf = result.components.schemas.ProductPolymorphic.oneOf;
+    const productRefs = productOneOf.map((item: any) => item.$ref);
+    expect(productRefs).toContain("#/components/schemas/TypeA");
+    expect(productRefs).toContain("#/components/schemas/TypeB");
+    expect(productRefs).toHaveLength(2);
+  });
+
+  it("merges nested oneOf schemas that are referenced", () => {
+    const doc: any = {
+      openapi: "3.0.0",
+      paths: {
+        "/products": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/ProductPolymorphic" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          // Manually created polymorphic wrappers (not created by allOfToOneOf)
+          ProductPolymorphic: {
+            oneOf: [
+              { $ref: "#/components/schemas/TypeA" },
+              { $ref: "#/components/schemas/SubProductPolymorphic" }
+            ],
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeA: "#/components/schemas/TypeA"
+              }
+            }
+          },
+          SubProductPolymorphic: {
+            oneOf: [
+              { $ref: "#/components/schemas/TypeB" },
+              { $ref: "#/components/schemas/TypeC" }
+            ],
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeB: "#/components/schemas/TypeB",
+                TypeC: "#/components/schemas/TypeC"
+              }
+            }
+          },
+          TypeA: { type: "object", properties: { name: { type: "string" } } },
+          TypeB: { type: "object", properties: { name: { type: "string" } } },
+          TypeC: { type: "object", properties: { name: { type: "string" } } }
+        }
+      }
+    };
+
+    const result = allOfToOneOf(doc, { mergeNestedOneOf: true });
+
+    // ProductPolymorphic should have TypeA, TypeB, TypeC (SubProductPolymorphic inlined)
+    const productOneOf = result.components.schemas.ProductPolymorphic.oneOf;
+    const refs = productOneOf.map((item: any) => item.$ref);
+    
+    expect(refs).toContain("#/components/schemas/TypeA");
+    expect(refs).toContain("#/components/schemas/TypeB");
+    expect(refs).toContain("#/components/schemas/TypeC");
+    expect(refs).not.toContain("#/components/schemas/SubProductPolymorphic");
+    expect(refs).toHaveLength(3);
+
+    // Check discriminator mapping was merged
+    const mapping = result.components.schemas.ProductPolymorphic.discriminator.mapping;
+    expect(mapping.TypeA).toBe("#/components/schemas/TypeA");
+    expect(mapping.TypeB).toBe("#/components/schemas/TypeB");
+    expect(mapping.TypeC).toBe("#/components/schemas/TypeC");
+  });
+
+  it("does not merge nested oneOf when option is disabled (default)", () => {
+    const doc: any = {
+      openapi: "3.0.0",
+      components: {
+        schemas: {
+          Product: {
+            type: "object",
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeA: "#/components/schemas/TypeA",
+                SubProduct: "#/components/schemas/SubProduct"
+              }
+            }
+          },
+          TypeA: { allOf: [{ $ref: "#/components/schemas/Product" }] },
+          SubProduct: {
+            type: "object",
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                TypeB: "#/components/schemas/TypeB"
+              }
+            }
+          },
+          TypeB: { allOf: [{ $ref: "#/components/schemas/SubProduct" }] }
+        }
+      }
+    };
+
+    // Don't pass mergeNestedOneOf option (defaults to false)
+    const result = allOfToOneOf(doc);
+
+    // ProductPolymorphic should NOT have TypeB inlined
+    expect(result.components.schemas.ProductPolymorphic).toBeUndefined();
+    expect(result.components.schemas.SubProductPolymorphic).toBeUndefined();
   });
 });
