@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] - 2026-01-19
+### Added
+- Added `mergeNestedOneOf` option to `allOfToOneOf` transformation to optimize oneOf schemas by inlining references to "simple oneOf wrapper" schemas (schemas containing only oneOf, discriminator, and/or description).
+- Added file-based test infrastructure to `allOfToOneOf` tests for easier regression testing with real-world examples.
+
+### Changed
+- Enhanced `allOfToOneOf` to skip creating polymorphic wrapper schemas when the base schema is only used for inheritance and not referenced directly in the API (paths, operations, or components).
+- Updated multiple tests to add explicit API references where polymorphic wrappers should be created, reflecting the new smarter wrapper creation logic.
+
 ## [0.4.0] - 2025-12-15
 ### Added
 - Introduced `removeDanglingRefs` (and the `remove-dangling-refs` decorator) so you can drop `$ref`s that point to deleted component schemas during programmatic runs or Redocly bundling.

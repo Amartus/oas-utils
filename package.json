@@ -1,6 +1,6 @@
 {
   "name": "@amartus/oas-utils",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Utilities for working with OpenAPI (OAS) documents.",
   "type": "module",
   "main": "dist/index.js",
