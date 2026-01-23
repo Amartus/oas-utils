@@ -4,8 +4,13 @@ import { Command } from "commander";
 import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators } from "./lib/cliActions.js";
 import YAML from "yaml";
 import {dropNulls} from "./lib/utils.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json");
 
 const program = new Command();
+program.version(packageJson.version, "-v, --version", "Display version number");
 program
   .command("remove-unused")
   .showHelpAfterError()
@@ -232,5 +237,5 @@ async function reader(input: string | undefined): Promise<string> {
 function format(doc: any, target?: string) {
   const isJson = target?.endsWith(".json");
   const cleanedDoc = dropNulls(doc) ?? {};
-  return isJson ? JSON.stringify(cleanedDoc, null, 2) + "\n" : YAML.stringify(cleanedDoc);
+  return isJson ? JSON.stringify(cleanedDoc, null, 2) + "\n" : YAML.stringify(cleanedDoc, { aliasDuplicateObjects: false });
 }

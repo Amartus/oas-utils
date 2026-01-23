@@ -49,12 +49,30 @@ const builders = {
   }),
 
   schema: {
-    simple: (type: string) => ({ type }),
+    simple: (type: string) => {
+      const obj = { type } as any;
+      obj.withDiscriminator = (propertyName: string, mapping: Record<string, string>) => {
+        obj.required = [propertyName];
+        obj.properties = { ...obj.properties, [propertyName]: { type: "string" } };
+        obj.discriminator = { propertyName, mapping };
+        return obj;
+      };
+      return obj;
+    },
     
-    withProps: (properties: Record<string, any>) => ({
-      type: "object",
-      properties
-    }),
+    withProps: (properties: Record<string, any>) => {
+      const obj = {
+        type: "object",
+        properties
+      } as any;
+      obj.withDiscriminator = (propertyName: string, mapping: Record<string, string>) => {
+        obj.required = [propertyName];
+        obj.properties = { ...obj.properties, [propertyName]: { type: "string" } };
+        obj.discriminator = { propertyName, mapping };
+        return obj;
+      };
+      return obj;
+    },
 
     withRef: (name: string) => ({ $ref: `#/components/schemas/${name}` }),
 
@@ -714,5 +732,74 @@ describe("removeUnusedSchemas (unit tests)", () => {
     
     // Unused should be removed
     expect(result.components.schemas.UnusedThing).toBeUndefined();
+  });
+
+  it("should promote parents and child hierarchies give parents are referenced", () => {
+    // RootSchema references A and X1
+    // B and C inherit from A (allOf A)
+    // D inherits from C (allOf C)
+    // X1, X2, X3 inherit from X (allOf X)
+    // So A, B, C, D, X should be promoted
+    
+    const doc = builders.doc(
+      { 
+        "/root": builders.path("get", builders.jsonResponse("RootSchema"))
+      },
+      {
+        RootSchema: builders.schema.withProps({
+          a: builders.schema.withRef("A"),
+          x: builders.schema.withRef("X1")
+        }),
+        A: builders.schema.withProps({
+          propA: { type: "string" }
+        }).withDiscriminator("type", {
+          B: "#/components/schemas/B",
+          C: "#/components/schemas/C",
+          D: "#/components/schemas/D"
+        }),
+        B: builders.schema.allOf(["A"], 
+          builders.schema.withProps({ propB: { type: "string" } })),
+        C: builders.schema.allOf(["A"], 
+          builders.schema.withProps({ propC: { type: "string" } })
+          .withDiscriminator("type", { D: "#/components/schemas/D" })),
+        D: builders.schema.allOf(["C"], 
+          builders.schema.withProps({ propD: { type: "string" } })),
+        X: builders.schema.withProps({
+          propX: { type: "string" }
+        }),
+        X1: builders.schema.allOf(["X"], 
+          builders.schema.withProps({ propX1: { type: "string" } })),
+        X2: builders.schema.allOf(["X"], 
+          builders.schema.withProps({ propX2: { type: "string" } })),
+        X3: builders.schema.allOf(["X"], 
+          builders.schema.withProps({ propX3: { type: "string" } }))
+      }
+    );
+
+    console.log(JSON.stringify(doc, null, 2));
+
+    const result = removeUnusedSchemas(deepClone(doc));
+
+    // RootSchema is directly used
+    expect(result.components.schemas.RootSchema).toBeDefined();
+    
+    // A is directly referenced by RootSchema
+    expect(result.components.schemas.A).toBeDefined();
+    
+    // B and C inherit from A, so they should be promoted (polymorphism)
+    // D inherits from C, so it should be promoted too
+    expect(result.components.schemas.B).toBeDefined();
+    expect(result.components.schemas.C).toBeDefined();
+    expect(result.components.schemas.D).toBeDefined();
+    
+    // X1 is directly referenced by RootSchema
+    expect(result.components.schemas.X1).toBeDefined();
+    
+    // X is parent of X1, so it should be promoted
+    expect(result.components.schemas.X).toBeDefined();
+    
+    // X is not referenced directly (as property, list property or oneOf member) so their children should not be automatically promoted
+    expect(result.components.schemas.X2).not.toBeDefined();
+    expect(result.components.schemas.X3).not.toBeDefined();
   });
 });

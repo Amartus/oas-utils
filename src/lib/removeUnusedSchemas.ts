@@ -30,6 +30,7 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
   // 1) Collect $ref targets starting ONLY from the paths section
   // Follow $ref to non-schema components to discover schemas nested within them.
   const used = new Set<string>();
+  const directlyReferenced = new Set<string>(); // Track schemas directly referenced from paths
   const queue: string[] = [];
   const visitedComponents = new Set<string>(); // key: section:name
   const usedComponents = new Map<string, Set<string>>(); // section -> names
@@ -52,6 +53,7 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     const n = refToName(refStr);
     if (n && !used.has(n)) {
       used.add(n);
+      directlyReferenced.add(n); // Mark as directly referenced
       queue.push(n);
       return;
     }
@@ -75,17 +77,32 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
   }
 
   // 2) Follow transitive references among schemas (downward closure via $ref in schema bodies)
+  // but exclude allOf parent references
 
   while (queue.length) {
     const name = queue.pop()!;
     const schema = schemas[name];
     if (!schema) continue;
-    collectRefsInSchema(schema, (n) => {
+    
+    // Collect allOf parents for this schema
+    const allOfParents = collectAllOfParents(schema);
+    
+    // Collect non-allOf refs and mark them as directly referenced
+    collectNonAllOfRefs(schema, allOfParents, (n) => {
       if (!used.has(n)) {
         used.add(n);
+        directlyReferenced.add(n);
         queue.push(n);
       }
     });
+    
+    // Add allOf parents to used but NOT to directlyReferenced
+    for (const parent of allOfParents) {
+      if (!used.has(parent)) {
+        used.add(parent);
+        // Don't add to queue since we don't want to follow refs from parent schemas yet
+      }
+    }
   }
 
 
@@ -94,7 +111,7 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
   const reverseAllOf = buildAllOfReverseMap(schemas);
   while (true) {
     const beforeCount = used.size;
-    promoteSchemasViaAllOfOnce(schemas, used, reverseAllOf, ignoreParentsSet);
+    promoteSchemasViaAllOfOnce(schemas, used, directlyReferenced, reverseAllOf, ignoreParentsSet);
     if (used.size === beforeCount) break;
   }
 
@@ -119,6 +136,33 @@ function collectRefsInSchema(schema: any, add: (name: string) => void) {
   for (const refStr of refs) {
     const maybe = refToName(refStr);
     if (maybe) add(maybe);
+  }
+}
+
+function collectAllOfParents(schema: any): Set<string> {
+  const parents = new Set<string>();
+  if (!schema || typeof schema !== "object") return parents;
+  
+  // Only collect top-level allOf (direct children of the schema object)
+  if (Array.isArray((schema as any).allOf)) {
+    for (const part of (schema as any).allOf as any[]) {
+      if (part && typeof part === "object" && typeof (part as any).$ref === "string") {
+        const parent = refToName((part as any).$ref);
+        if (parent) parents.add(parent);
+      }
+    }
+  }
+  
+  return parents;
+}
+
+function collectNonAllOfRefs(schema: any, allOfParents: Set<string>, add: (name: string) => void) {
+  if (!schema || typeof schema !== "object") return;
+  const refs = JSONPath({ path: "$..$ref", json: schema, resultType: "value" }) as string[];
+  if (!Array.isArray(refs)) return;
+  for (const refStr of refs) {
+    const maybe = refToName(refStr);
+    if (maybe && !allOfParents.has(maybe)) add(maybe);
   }
 }
 
@@ -155,6 +199,7 @@ function buildAllOfReverseMap(schemas: Record<string, any>) {
 function promoteSchemasViaAllOfOnce(
   schemas: Record<string, any>,
   used: Set<string>,
+  directlyReferenced: Set<string>,
   reverseAllOf: Map<string, Set<string>>,
   ignoreParentsSet: Set<string>
 ) {
@@ -165,13 +210,19 @@ function promoteSchemasViaAllOfOnce(
     const base = upQueue.pop()!;
     if (!used.has(base)) continue;
     if (ignoreParentsSet.has(base)) continue;
-    const parents = reverseAllOf.get(base);
-    if (!parents) continue;
-    for (const parent of parents) {
-      if (!used.has(parent)) {
-        used.add(parent);
-        promoted.add(parent);
-        upQueue.push(parent);
+    
+    // Only promote children if the base schema is directly referenced (not just promoted as a parent)
+    if (directlyReferenced.has(base)) {
+      const inheriting = reverseAllOf.get(base);
+      if (!inheriting) continue;
+      
+      for (const child of inheriting) {
+        if (!used.has(child)) {
+          used.add(child);
+          directlyReferenced.add(child); // Mark promoted children as directly referenced so they can promote their own children
+          promoted.add(child);
+          upQueue.push(child);
+        }
       }
     }
   }
@@ -181,12 +232,26 @@ function promoteSchemasViaAllOfOnce(
     const name = queue2.pop()!;
     const schema = schemas[name];
     if (!schema) continue;
-    collectRefsInSchema(schema, (n) => {
+    
+    // Collect allOf parents for this schema
+    const allOfParents = collectAllOfParents(schema);
+    
+    // Only collect non-allOf refs and mark them as directly referenced
+    collectNonAllOfRefs(schema, allOfParents, (n) => {
       if (!used.has(n)) {
         used.add(n);
+        directlyReferenced.add(n);
         queue2.push(n);
       }
     });
+    
+    // Add allOf parents to used but NOT to directlyReferenced
+    for (const parent of allOfParents) {
+      if (!used.has(parent)) {
+        used.add(parent);
+        queue2.push(parent);
+      }
+    }
   }
 
   return used;
