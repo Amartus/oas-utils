@@ -750,6 +750,9 @@ describe("removeUnusedSchemas (unit tests)", () => {
           a: builders.schema.withRef("A"),
           x: builders.schema.withRef("X1")
         }),
+        ExtraRoot: builders.schema.withProps({
+          extra: {type: "string" }
+        }),
         A: builders.schema.withProps({
           propA: { type: "string" }
         }).withDiscriminator("type", {
@@ -757,7 +760,7 @@ describe("removeUnusedSchemas (unit tests)", () => {
           C: "#/components/schemas/C",
           D: "#/components/schemas/D"
         }),
-        B: builders.schema.allOf(["A"], 
+        B: builders.schema.allOf(["A", "ExtraRoot"],
           builders.schema.withProps({ propB: { type: "string" } })),
         C: builders.schema.allOf(["A"], 
           builders.schema.withProps({ propC: { type: "string" } })
@@ -797,9 +800,112 @@ describe("removeUnusedSchemas (unit tests)", () => {
     
     // X is parent of X1, so it should be promoted
     expect(result.components.schemas.X).toBeDefined();
+
+    // ExtraRoot is a parent for B so it should be promoted too
+    expect(result.components.schemas.ExtraRoot).toBeDefined();
     
     // X is not referenced directly (as property, list property or oneOf member) so their children should not be automatically promoted
     expect(result.components.schemas.X2).not.toBeDefined();
     expect(result.components.schemas.X3).not.toBeDefined();
   });
+
+  it("should keep transitive allOf parents even when intermediate schema is in ignoreParents", () => {
+    // This test captures a bug where Base2 was removed when Base1 was in ignoreParents
+    // Scenario: Child -> Base1 -> [Base2, Base3]
+    // When Base1 is in ignoreParents, we still need to keep Base2 and Base3
+    
+    const doc = builders.doc(
+      {
+        "/entity": builders.path("get", builders.jsonResponse("Child"))
+      },
+      {
+        Child: builders.schema.allOf(["Base1"], 
+          builders.schema.withProps({ 
+            childProp: { type: "string" }
+          })),
+        Base1: builders.schema.allOf(["Base2", "Base3"]),
+        Base2: builders.schema.withProps({
+          base2Prop: { type: "string" }
+        }),
+        Base3: builders.schema.withProps({
+          base3Prop: { type: "string" }
+        }),
+        Unrelated: builders.schema.withProps({
+          unused: { type: "string" }
+        })
+      }
+    );
+
+    const result = removeUnusedSchemas(doc, { 
+      ignoreParents: ["Base1", "Base2", "Base3"]
+    });
+
+    // Child should be kept (directly referenced from path)
+    expect(result.components.schemas.Child).toBeDefined();
+    
+    // Base1 should be kept (allOf parent of Child)
+    expect(result.components.schemas.Base1).toBeDefined();
+    
+    // Base2 and Base3 should be kept (transitive allOf parents through Base1)
+    // This is the key assertion - even though Base1 is in ignoreParents,
+    // its own allOf parents should still be collected
+    expect(result.components.schemas.Base2).toBeDefined();
+    expect(result.components.schemas.Base3).toBeDefined();
+    
+    // Unrelated should be removed
+    expect(result.components.schemas.Unrelated).toBeUndefined();
+  });
+
+  it("should keep schemas referenced in array items", () => {
+    // This test captures a bug where Item was removed
+    // when referenced only via array items property in a schema that is in ignoreParents
+    // Scenario: Container (in ignoreParents) has a property that is an array with items.$ref to Item
+    
+    const doc = builders.doc(
+      {
+        "/containers": builders.path("get", builders.arrayResponse("Container"))
+      },
+      {
+        Container: builders.schema.allOf(["Parent"], 
+          builders.schema.withProps({
+            name: { type: "string" },
+            items: {
+              type: "array",
+              items: builders.schema.withRef("Item")
+            }
+          })),
+        Parent: builders.schema.allOf(["Base"]),
+        Base: builders.schema.withProps({
+          baseType: { type: "string" }
+        }),
+        Item: builders.schema.withProps({
+          id: { type: "string" },
+          value: { type: "string" }
+        }),
+        Unused: builders.schema.withProps({
+          unused: { type: "string" }
+        })
+      }
+    );
+
+    const result = removeUnusedSchemas(doc, { 
+      ignoreParents: ["Parent", "Base", "Container"]
+    });
+
+    // Container should be kept (directly referenced from path)
+    expect(result.components.schemas.Container).toBeDefined();
+    
+    // Parent and Base should be kept (allOf parents)
+    expect(result.components.schemas.Parent).toBeDefined();
+    expect(result.components.schemas.Base).toBeDefined();
+    
+    // Item should be kept (referenced in array items from Container)
+    // This is the key assertion - even when Container is in ignoreParents,
+    // schemas it references in array items should still be detected
+    expect(result.components.schemas.Item).toBeDefined();
+    
+    // Unused should be removed
+    expect(result.components.schemas.Unused).toBeUndefined();
+  });
+
 });

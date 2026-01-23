@@ -97,10 +97,25 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
     });
     
     // Add allOf parents to used but NOT to directlyReferenced
+    // Also recursively collect their allOf parents (transitive closure of allOf relationships)
+    // AND collect their non-allOf references so their properties are followed
     for (const parent of allOfParents) {
       if (!used.has(parent)) {
         used.add(parent);
-        // Don't add to queue since we don't want to follow refs from parent schemas yet
+        // Recursively collect allOf parents of this parent
+        collectTransitiveAllOfParents(schemas, parent, used);
+        // Also collect non-allOf refs from the parent so its properties are followed
+        const parentSchema = schemas[parent];
+        if (parentSchema) {
+          const parentAllOfParents = collectAllOfParents(parentSchema);
+          collectNonAllOfRefs(parentSchema, parentAllOfParents, (n) => {
+            if (!used.has(n)) {
+              used.add(n);
+              directlyReferenced.add(n);
+              queue.push(n);
+            }
+          });
+        }
       }
     }
   }
@@ -154,6 +169,25 @@ function collectAllOfParents(schema: any): Set<string> {
   }
   
   return parents;
+}
+
+/**
+ * Recursively collect all allOf parents transitively.
+ * This ensures that if A references B via allOf, and B references C via allOf,
+ * then all of A, B, and C are added to the used set.
+ */
+function collectTransitiveAllOfParents(schemas: Record<string, any>, schemaName: string, used: Set<string>) {
+  const schema = schemas[schemaName];
+  if (!schema) return;
+  
+  const parents = collectAllOfParents(schema);
+  for (const parent of parents) {
+    if (!used.has(parent)) {
+      used.add(parent);
+      // Recursively collect parents of this parent
+      collectTransitiveAllOfParents(schemas, parent, used);
+    }
+  }
 }
 
 function collectNonAllOfRefs(schema: any, allOfParents: Set<string>, add: (name: string) => void) {
@@ -250,6 +284,8 @@ function promoteSchemasViaAllOfOnce(
       if (!used.has(parent)) {
         used.add(parent);
         queue2.push(parent);
+        // Also recursively collect transitive allOf parents
+        collectTransitiveAllOfParents(schemas, parent, used);
       }
     }
   }
