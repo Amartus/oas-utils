@@ -122,10 +122,15 @@ program
     "Skip oneOf transformation if only one specialization is found",
     false
   )
+  .option(
+    "--merge-nested-oneof",
+    "Merge nested oneOf schemas by inlining references to schemas that only contain oneOf",
+    false
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean }
+      opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean }
     ) => {
       try {
         await runAllOfToOneOf(opts, format, () => reader(input));

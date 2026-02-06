@@ -786,6 +786,139 @@ describe("allOfToOneOf", () => {
     ).toBe("#/components/schemas/Cat");
   });
 
+  it("converts vehicle hierarchy with commercial vehicle references", () => {
+    const doc: any = {
+      openapi: "3.0.0",
+      components: {
+        schemas: {
+          Vehicle: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              type: { type: "string" }
+            },
+            discriminator: {
+              propertyName: "type",
+              mapping: {
+                Car: "#/components/schemas/Car",
+                Bike: "#/components/schemas/Bike",
+                ElectricCar: "#/components/schemas/ElectricCar"
+              }
+            }
+          },
+          Car: {
+            allOf: [
+              { $ref: "#/components/schemas/Vehicle" },
+              {
+                type: "object",
+                properties: {
+                  carKind: { type: "string" },
+                  seatingCapacity: { type: "number" }
+                }
+              }
+            ],
+            discriminator: {
+              propertyName: "carKind",
+              mapping: {
+                Car: "#/components/schemas/Car",
+                ElectricCar: "#/components/schemas/ElectricCar",
+                CommercialCar: "#/components/schemas/CommercialCar"
+              }
+            }
+          },
+          ElectricCar: {
+            allOf: [
+              { $ref: "#/components/schemas/Car" },
+              {
+                type: "object",
+                properties: {
+                  batteryCapacity: { type: "number" }
+                }
+              }
+            ]
+          },
+          Bike: {
+            allOf: [
+              { $ref: "#/components/schemas/Vehicle" },
+              {
+                type: "object",
+                properties: {
+                  engineType: { type: "string" }
+                }
+              }
+            ]
+          },
+          CommercialCar: {
+            allOf: [
+              { $ref: "#/components/schemas/Car" },
+              {
+                type: "object",
+                properties: {
+                  cargoCapacity: { type: "number" }
+                }
+              }
+            ],
+            discriminator: {
+              propertyName: "commercialKind",
+              mapping: {
+                Car: "#/components/schemas/Car",
+                ElectricCar: "#/components/schemas/ElectricCar"
+              }
+            }
+          },
+          Dealership: {
+            type: "object",
+            properties: {
+              baseVehicle: { $ref: "#/components/schemas/Vehicle" },
+              primaryCar: { $ref: "#/components/schemas/Car" },
+              commercialVehicle: { $ref: "#/components/schemas/CommercialCar" },
+              electricLink: { $ref: "#/components/schemas/ElectricCar" }
+            }
+          }
+        }
+      },
+      paths: {
+        "/dealership": {
+          get: {
+            responses: {
+              "200": {
+                description: "Returns dealership",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Dealership" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    const result = allOfToOneOf(doc);
+
+    const vehicleWrapper = result.components.schemas.VehiclePolymorphic;
+    expect(vehicleWrapper).toBeDefined();
+    const vehicleRefs = vehicleWrapper.oneOf.map((item: any) => item.$ref);
+    expect(vehicleRefs).toContain("#/components/schemas/Bike");
+    expect(vehicleRefs).toContain("#/components/schemas/CarPolymorphic");
+
+    const carWrapper = result.components.schemas.CarPolymorphic;
+    expect(carWrapper).toBeDefined();
+    const carRefs = carWrapper.oneOf.map((item: any) => item.$ref);
+    expect(carRefs).toContain("#/components/schemas/ElectricCar");
+    expect(carRefs).toContain("#/components/schemas/CommercialCar");
+
+    const dealershipProps = result.components.schemas.Dealership.properties;
+    expect(dealershipProps.baseVehicle.$ref).toBe("#/components/schemas/VehiclePolymorphic");
+    expect(dealershipProps.primaryCar.$ref).toBe("#/components/schemas/CarPolymorphic");
+    expect(dealershipProps.commercialVehicle.$ref).toBe("#/components/schemas/CommercialCar");
+    expect(dealershipProps.electricLink.$ref).toBe("#/components/schemas/ElectricCar");
+
+    expect(result.components.schemas.Vehicle.discriminator).toBeUndefined();
+    expect(result.components.schemas.CommercialCar.discriminator).toBeDefined();
+  });
+
   it("merges nested oneOf when mergeNestedOneOf option is enabled", () => {
     const doc: any = {
       openapi: "3.0.0",
