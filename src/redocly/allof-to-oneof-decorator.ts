@@ -1,4 +1,4 @@
-import { allOfToOneOf } from "../lib/allOfToOneOf.js";
+import { allOfToOneOf } from "../lib/allOfToOneOfJsonPath.js";
 
 export default function AllOfToOneOfDecorator(opts: any) {
   return {

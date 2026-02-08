@@ -7,7 +7,8 @@ import {
   removeFromOneOfByName,
   removeFromOneOfGlobally,
 } from "./removeFromOneOfByName.js";
-import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
+import { AllOfToOneOfOptions } from "./allOfToOneOfInterface.js";
+import { allOfToOneOf } from "./allOfToOneOfJsonPath.js";
 import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
 import { removeDanglingRefs } from "./removeDanglingRefs.js";
