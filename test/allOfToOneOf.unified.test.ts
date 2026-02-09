@@ -171,7 +171,7 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
 
       const result = transform(deepClone(input), { addDiscriminatorConst: false });
       const comparison = deepEqualUnordered(result, expected);
-      
+
       if (!comparison.equal) {
         console.log(`\n❌ Test failed: nested-oneof-discriminators-sametypedisc (noconst)`);
         console.log(`\n📋 Differences found (${comparison.diffs.length}):`);
@@ -179,8 +179,100 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
         console.log(`\n📄 Full actual result:\n${JSON.stringify(result, null, 2)}`);
         console.log(`\n📄 Full expected result:\n${JSON.stringify(expected, null, 2)}`);
       }
-      
+
       expect(comparison.equal, `Differences:\n${comparison.diffs.join('\n')}`).toBe(true);
+    });
+
+    it("nested-oneof-discriminators-sametypedisc - with addDiscriminatorConst: false and mergeNestedOneOf: true", async () => {
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const base = path.resolve(__dirname, "resources", "nested-oneof-discriminators-sametypedisc");
+      const inputPath = base + ".input.yaml";
+      const expectedPath = base + ".mergeOneOf.expected.yaml";
+
+      const input = await loadYaml(inputPath);
+      const expected = await loadYaml(expectedPath);
+
+      const result = transform(deepClone(input), { addDiscriminatorConst: false, mergeNestedOneOf: true });
+      const comparison = deepEqualUnordered(result, expected);
+
+      if (!comparison.equal) {
+        console.log(`\n❌ Test failed: nested-oneof-discriminators-sametypedisc (mergeOneOf)`);
+        console.log(`\n📋 Differences found (${comparison.diffs.length}):`);
+        comparison.diffs.forEach((diff, i) => console.log(`  ${i + 1}. ${diff}`));
+        console.log(`\n📄 Full actual result:\n${JSON.stringify(result, null, 2)}`);
+        console.log(`\n📄 Full expected result:\n${JSON.stringify(expected, null, 2)}`);
+      }
+
+      expect(comparison.equal, `Differences:\n${comparison.diffs.join('\n')}`).toBe(true);
+    });
+
+    it("does not uplift when children have different discriminator property names", async () => {
+      const doc: any = {
+        openapi: "3.0.0",
+        components: {
+          schemas: {
+            Animal: {
+              oneOf: [
+                { $ref: "#/components/schemas/CatPolymorphic" },
+                { $ref: "#/components/schemas/BirdPolymorphic" }
+              ],
+              discriminator: {
+                propertyName: "kind",
+                mapping: {
+                  Cat: "#/components/schemas/CatPolymorphic",
+                  Bird: "#/components/schemas/BirdPolymorphic"
+                }
+              }
+            },
+            CatPolymorphic: {
+              oneOf: [
+                { $ref: "#/components/schemas/DomesticCat" },
+                { $ref: "#/components/schemas/WildCat" }
+              ],
+              discriminator: {
+                propertyName: "catType",
+                mapping: {
+                  Domestic: "#/components/schemas/DomesticCat",
+                  Wild: "#/components/schemas/WildCat"
+                }
+              }
+            },
+            BirdPolymorphic: {
+              oneOf: [
+                { $ref: "#/components/schemas/Sparrow" },
+                { $ref: "#/components/schemas/Eagle" }
+              ],
+              discriminator: {
+                propertyName: "birdType",
+                mapping: {
+                  Sparrow: "#/components/schemas/Sparrow",
+                  Eagle: "#/components/schemas/Eagle"
+                }
+              }
+            },
+            DomesticCat: { type: "object", properties: { name: { type: "string" } } },
+            WildCat: { type: "object", properties: { habitat: { type: "string" } } },
+            Sparrow: { type: "object", properties: { chirp: { type: "string" } } },
+            Eagle: { type: "object", properties: { wingspan: { type: "number" } } }
+          }
+        }
+      };
+
+      const result = transform(deepClone(doc), { mergeNestedOneOf: true });
+
+      // Animal should NOT merge children because they use different discriminator property names
+      expect(result.components.schemas.Animal.oneOf).toHaveLength(2);
+      expect(result.components.schemas.Animal.oneOf[0].$ref).toBe("#/components/schemas/CatPolymorphic");
+      expect(result.components.schemas.Animal.oneOf[1].$ref).toBe("#/components/schemas/BirdPolymorphic");
+
+      // Animal discriminator should remain unchanged since no merge happened
+      expect(result.components.schemas.Animal.discriminator.propertyName).toBe("kind");
+
+      // Child wrappers should still exist with their original structure
+      expect(result.components.schemas.CatPolymorphic.oneOf).toHaveLength(2);
+      expect(result.components.schemas.CatPolymorphic.discriminator.propertyName).toBe("catType");
+      expect(result.components.schemas.BirdPolymorphic.oneOf).toHaveLength(2);
+      expect(result.components.schemas.BirdPolymorphic.discriminator.propertyName).toBe("birdType");
     });
   });
 

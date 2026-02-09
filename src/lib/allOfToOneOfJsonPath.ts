@@ -609,9 +609,29 @@ function mergeNestedOneOfSchemas(schemas: Record<string, SchemaObject>): void {
   for (const schema of Object.values(schemas)) {
     if (!isValidSchema(schema) || !Array.isArray(schema.oneOf)) continue;
 
+    // First pass: collect discriminator property names from candidate children
+    const candidatePropertyNames = new Set<string>();
+    for (const entry of schema.oneOf) {
+      const refName = isSchemaReference(entry) ? refToName(entry.$ref) : null;
+      if (!refName || !simpleOneOfSchemas.has(refName)) continue;
+
+      const referencedSchema = schemas[refName];
+      if (referencedSchema?.discriminator?.propertyName) {
+        candidatePropertyNames.add(referencedSchema.discriminator.propertyName);
+      }
+    }
+
+    // Only merge if all candidates use the same discriminator property name
+    const canMerge = candidatePropertyNames.size <= 1;
+    if (!canMerge) {
+      // Skip merging for this schema - children have conflicting discriminator property names
+      continue;
+    }
+
     let modified = false;
     const newOneOf: Array<SchemaReference | SchemaObject> = [];
     const mergedMappings: Record<string, string> = {};
+    const discriminatorPropertyNames = new Set<string>();
 
     for (const entry of schema.oneOf) {
       const refName = isSchemaReference(entry) ? refToName(entry.$ref) : null;
@@ -626,6 +646,12 @@ function mergeNestedOneOfSchemas(schemas: Record<string, SchemaObject>): void {
       if (Array.isArray(referencedSchema?.oneOf)) {
         newOneOf.push(...referencedSchema.oneOf);
         Object.assign(mergedMappings, referencedSchema.discriminator?.mapping || {});
+
+        // Track discriminator property name
+        if (referencedSchema.discriminator?.propertyName) {
+          discriminatorPropertyNames.add(referencedSchema.discriminator.propertyName);
+        }
+
         modified = true;
       } else {
         newOneOf.push(entry);
@@ -641,7 +667,12 @@ function mergeNestedOneOfSchemas(schemas: Record<string, SchemaObject>): void {
 
       // Merge discriminator mappings
       if (Object.keys(mergedMappings).length > 0) {
-        schema.discriminator = schema.discriminator || { propertyName: 'type', mapping: {} };
+        // Use the common property name from children, or default to 'type'
+        const propertyName = discriminatorPropertyNames.size === 1
+          ? Array.from(discriminatorPropertyNames)[0]
+          : 'type';
+
+        schema.discriminator = schema.discriminator || { propertyName, mapping: {} };
         schema.discriminator.mapping = { ...schema.discriminator.mapping, ...mergedMappings };
       }
     }

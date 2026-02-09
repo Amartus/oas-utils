@@ -108,11 +108,6 @@ program
     "Write result to this file (defaults to stdout)"
   )
   .option(
-    "--remove-discriminator-from-base",
-    "Remove discriminator from base schemas after conversion",
-    false
-  )
-  .option(
     "--no-add-discriminator-const",
     "Do not add const property with discriminator value to specialization schemas",
     true
@@ -130,7 +125,7 @@ program
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; removeDiscriminatorFromBase?: boolean; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean }
+      opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean }
     ) => {
       try {
         await runAllOfToOneOf(opts, format, () => reader(input));
