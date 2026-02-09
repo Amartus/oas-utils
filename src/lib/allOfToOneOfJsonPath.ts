@@ -140,6 +140,7 @@ function isReferencedOutsideComposition(
 ): boolean {
   const schemaRef = `#/components/schemas/${schemaName}`;
   const usageContexts = new Set(['oneOf', 'anyOf', 'properties', 'items', 'schema']);
+  const inheritanceContexts = new Set(['allOf', 'discriminator', 'mapping']);
 
   const allRefs = JSONPath({
     path: '$..$ref',
@@ -150,10 +151,17 @@ function isReferencedOutsideComposition(
   for (const refResult of allRefs) {
     if (refResult.value !== schemaRef) continue;
 
-    const pathParts = refResult.path.split(/[\[\]\.]+/).filter(Boolean);
+    const pathParts = refResult.path
+      .replace(/\['/g, '.')
+      .replace(/'\]/g, '')
+      .replace(/\[/g, '.')
+      .replace(/\]/g, '')
+      .split('.')
+      .filter(Boolean);
 
-    // Look backwards for context - if we hit allOf first, it's pure inheritance
+    // Look backwards for context
     let inAllOf = -1;
+    let inDiscriminatorMapping = -1;
     let inUsageContext = -1;
 
     for (let i = pathParts.length - 1; i >= 0; i--) {
@@ -161,16 +169,22 @@ function isReferencedOutsideComposition(
       if (inAllOf === -1 && part === 'allOf') {
         inAllOf = i;
       }
+      if (inDiscriminatorMapping === -1 && (part === 'discriminator' || part === 'mapping')) {
+        inDiscriminatorMapping = i;
+      }
       if (inUsageContext === -1 && usageContexts.has(part)) {
         inUsageContext = i;
       }
-      if (inAllOf !== -1 && inUsageContext !== -1) break;
+      if (inAllOf !== -1 && inDiscriminatorMapping !== -1 && inUsageContext !== -1) break;
     }
 
-    // If not in allOf, or in a usage context that comes after allOf, needs wrapper
-    if (inAllOf === -1 || (inUsageContext > inAllOf)) {
-      return true;
+    // Skip if in allOf (pure inheritance) or in discriminator mapping (metadata)
+    if (inAllOf !== -1 || inDiscriminatorMapping !== -1) {
+      continue;
     }
+
+    // If in a usage context or neither, it's actual usage
+    return true;
   }
 
   return false;
@@ -238,9 +252,34 @@ function createPolymorphicWrappers(
 
   const wrapperSuffix = 'Polymorphic';
 
+  // First pass: determine which schemas will get wrappers
+  const schemasGettingWrappers = new Set<string>();
+  for (const [parentName, discInfo] of discriminatorParents.entries()) {
+    const { validChildren } = validateAndGetChildren(
+      parentName,
+      discInfo.mapping,
+      schemas,
+      inheritanceGraph
+    );
+
+    // Only create wrapper if schema is referenced outside allOf (actual usage)
+    // If it's only used for inheritance, children handle their own polymorphism
+    const isReferencedDirectly = isReferencedOutsideComposition(parentName, doc);
+
+    if (isReferencedDirectly && validChildren.length > 0) {
+      if (validChildren.length === 1 && (opts.ignoreSingleSpecialization || validChildren[0] === parentName)) {
+        continue;
+      }
+      schemasGettingWrappers.add(parentName);
+    }
+  }
+
   function createWrapper(parentName: string, discInfo: DiscriminatorInfo, validChildren: string[]): SchemaObject | undefined {
-    const isUsed = isReferencedOutsideComposition(parentName, doc) || validChildren.includes(parentName);
-    if (!isUsed || validChildren.length === 0) {
+    // Only create wrapper if schema is referenced outside allOf (actual usage)
+    // If it's only used for inheritance, children handle their own polymorphism
+    const isReferencedDirectly = isReferencedOutsideComposition(parentName, doc);
+
+    if (!isReferencedDirectly || validChildren.length === 0) {
       return;
     }
     if (validChildren.length === 1) {
@@ -263,7 +302,7 @@ function createPolymorphicWrappers(
     // Add const properties (creates wrapper for parent self-reference)
     // Do this BEFORE building oneOf so we can use the updated mapping
     if (opts.addDiscriminatorConst !== false) {
-      const result = addDiscriminatorConstToChildren(schemas, validChildren, discInfo, parentName);
+      const result = addDiscriminatorConstToChildren(schemas, validChildren, discInfo, parentName, schemasGettingWrappers);
       // Update the mapping if it changed
       if (result.updatedMapping) {
         discInfo.mapping = result.updatedMapping;
@@ -331,7 +370,8 @@ function addDiscriminatorConstToChildren(
   schemas: Record<string, SchemaObject>,
   childNames: string[],
   discInfo: DiscriminatorInfo,
-  parentName: string
+  parentName: string,
+  schemasGettingWrappers: Set<string>
 ): { updatedMapping?: Record<string, string> } {
   const updatedMapping: Record<string, string> = { ...discInfo.mapping };
   let mappingChanged = false;
@@ -365,6 +405,12 @@ function addDiscriminatorConstToChildren(
       };
       updatedMapping[discriminatorValue] = `#/components/schemas/${wrapperName}`;
       mappingChanged = true;
+      continue;
+    }
+
+    // Skip adding const to children that will get their own wrappers
+    // They will handle their own const via their OneOf wrapper
+    if (schemasGettingWrappers.has(childName)) {
       continue;
     }
 
