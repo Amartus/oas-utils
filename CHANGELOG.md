@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0] - 2026-02-09
+### Breaking Changes
+- Rewrote `allOfToOneOf` using a JSONPath-based implementation, replacing the original recursive approach. The public API (`allOfToOneOf` function and CLI command) remains the same, but the internal module path changed from `allOfToOneOf.js` to `allOfToOneOfJsonPath.js`.
+- Removed the non-functional `--remove-discriminator-from-base` CLI option and `removeDiscriminatorFromBase` config key. Discriminators are now always removed from base schemas that receive polymorphic wrappers.
+
+### Added
+- `--merge-nested-oneof` CLI option for `allof-to-oneof` command to merge nested oneOf schemas by inlining references to schemas that only contain oneOf.
+- Extracted `AllOfToOneOfOptions` and `AllOfToOneOfTransform` interfaces into a dedicated `allOfToOneOfInterface.ts` module.
+- File-based test infrastructure for `allOfToOneOf` with real-world regression test cases.
+- Test for inheritance-only parent schemas (bases not referenced directly in the API).
+
+### Changed
+- `allOfToOneOf` now skips creating polymorphic wrapper schemas when the base schema is only used for inheritance and not referenced directly in paths, operations, or other components.
+- Updated README documentation to accurately reflect `allof-to-oneof` behavior, options, and Redocly decorator configuration.
+
+### Removed
+- Removed the original `allOfToOneOf.ts` implementation.
+- Removed the alternative `allOfToOneOfOptimized.ts` implementation.
+
 ## [0.5.0] - 2026-01-19
 ### Added
 - Added `mergeNestedOneOf` option to `allOfToOneOf` transformation to optimize oneOf schemas by inlining references to "simple oneOf wrapper" schemas (schemas containing only oneOf, discriminator, and/or description).
