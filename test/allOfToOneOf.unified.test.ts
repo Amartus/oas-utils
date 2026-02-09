@@ -4,8 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { AllOfToOneOfTransform } from "../src/lib/allOfToOneOfInterface.js";
-import { allOfToOneOf as allOfToOneOfOptimized } from "../src/lib/allOfToOneOfOptimized.js";
-import { allOfToOneOf as allOfToOneOfJsonPath } from "../src/lib/allOfToOneOfJsonPath.js";
+import { allOfToOneOf } from "../src/lib/allOfToOneOfJsonPath.js";
 import { testSchemas } from "./schemaLoader.js";
 
 async function loadYaml(file: string): Promise<any> {
@@ -120,8 +119,7 @@ function deepEqualUnordered(a: any, b: any, path: string = "root"): { equal: boo
  * Each test receives the transform function as a parameter.
  */
 const implementations: Array<{ name: string; transform: AllOfToOneOfTransform }> = [
-  { name: "optimized", transform: allOfToOneOfOptimized },
-  { name: "jsonpath", transform: allOfToOneOfJsonPath },
+  { name: "jsonpath", transform: allOfToOneOf },
 ];
 
 describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, transform }) => {
