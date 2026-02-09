@@ -7,7 +7,8 @@ import {
   removeFromOneOfByName,
   removeFromOneOfGlobally,
 } from "./removeFromOneOfByName.js";
-import { allOfToOneOf, AllOfToOneOfOptions } from "./allOfToOneOf.js";
+import { AllOfToOneOfOptions } from "./allOfToOneOfInterface.js";
+import { allOfToOneOf } from "./allOfToOneOfJsonPath.js";
 import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
 import { removeDanglingRefs } from "./removeDanglingRefs.js";
@@ -175,7 +176,7 @@ export async function optimizeAllOf(
  * @param reader - Function to read input
  */
 export async function runAllOfToOneOf(
-  opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean },
+  opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -187,6 +188,8 @@ export async function runAllOfToOneOf(
   const topts: AllOfToOneOfOptions = {
     addDiscriminatorConst: opts.addDiscriminatorConst !== false,
     ignoreSingleSpecialization: Boolean(opts.ignoreSingleSpecialization),
+    mergeNestedOneOf: Boolean(opts.mergeNestedOneof),
+    onWarning: (msg) => console.warn(`[WARN] ${msg}`),
   };
 
   allOfToOneOf(doc, topts);

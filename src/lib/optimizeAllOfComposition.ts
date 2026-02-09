@@ -1,13 +1,6 @@
 import { refToName } from "./oasUtils.js";
 
-// Dynamically require JSONPath for optional, per-schema value queries
-let JSONPath: any | undefined = undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  JSONPath = require("jsonpath-plus").JSONPath;
-} catch (e) {
-  JSONPath = undefined;
-}
+import { JSONPath } from "jsonpath-plus";
 
 /**
  * Optimize allOf composition globally across an OpenAPI document.

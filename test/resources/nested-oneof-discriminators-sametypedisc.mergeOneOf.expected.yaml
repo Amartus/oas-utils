@@ -1,0 +1,124 @@
+openapi: 3.0.0
+info:
+  title: Animal API with Nested Discriminators
+  version: 1.0.0
+  description: API demonstrating oneOf with nested discriminators
+
+paths:
+  /animals:
+    get:
+      operationId: listAnimals
+      summary: Get all animals
+      description: Returns an array of animals with nested polymorphism
+      responses:
+        "200":
+          description: List of animals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Animal"
+
+components:
+  schemas:
+    Animal:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Lion"
+        - $ref: "#/components/schemas/Panthera"
+        - $ref: "#/components/schemas/Sparrow"
+        - $ref: "#/components/schemas/Eagle"
+      discriminator:
+        propertyName: animalType
+        mapping:
+          Cat: "#/components/schemas/Cat"
+          Lion: "#/components/schemas/Lion"
+          Panthera: "#/components/schemas/Panthera"
+          Sparrow: "#/components/schemas/Sparrow"
+          Eagle: "#/components/schemas/Eagle"
+    Cat:
+      type: object
+      required:
+        - animalType
+      properties:
+        animalType:
+          type: string
+        furColor:
+          type: string
+
+    CatPolymorphic:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Lion"
+        - $ref: "#/components/schemas/Panthera"
+      discriminator:
+        propertyName: animalType
+        mapping:
+          Cat: "#/components/schemas/Cat"
+          Lion: "#/components/schemas/Lion"
+          Panthera: "#/components/schemas/Panthera"
+
+    Lion:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          required:
+            - maneSize
+          properties:
+            maneSize:
+              type: string
+              enum:
+                - small
+                - medium
+                - large
+
+    Panthera:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          required:
+            - spotPattern
+          properties:
+            spotPattern:
+              type: string
+
+    Bird:
+      type: object
+      required:
+        - animalType
+      properties:
+        animalType:
+          type: string
+        wingSpan:
+          type: number
+
+    BirdPolymorphic:
+      oneOf:
+        - $ref: "#/components/schemas/Sparrow"
+        - $ref: "#/components/schemas/Eagle"
+      discriminator:
+        propertyName: animalType
+        mapping:
+          Sparrow: "#/components/schemas/Sparrow"
+          Eagle: "#/components/schemas/Eagle"
+
+    Sparrow:
+      allOf:
+        - $ref: "#/components/schemas/Bird"
+        - type: object
+          required:
+            - chirpFrequency
+          properties:
+            chirpFrequency:
+              type: integer
+
+    Eagle:
+      allOf:
+        - $ref: "#/components/schemas/Bird"
+        - type: object
+          required:
+            - huntingRange
+          properties:
+            huntingRange:
+              type: number

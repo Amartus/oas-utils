@@ -1,0 +1,83 @@
+openapi: 3.0.1
+info:
+  title: Inheritance-only parent schema test
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChildPolymorphic'
+components:
+  schemas:
+    Entity:
+      type: object
+      properties:
+        '@type':
+          type: string
+    
+    # Parent should NOT get a Polymorphic wrapper because it's never referenced directly
+    # It's only used in allOf (inheritance)
+    Parent:
+      allOf:
+        - $ref: '#/components/schemas/Entity'
+        - type: object
+          properties:
+            name:
+              type: string
+    
+    # Child should NOT have const added directly
+    # Because we're creating ChildOneOf for it
+    Child:
+      allOf:
+        - $ref: '#/components/schemas/Parent'
+        - type: object
+          properties:
+            childProp:
+              type: string
+    
+    # GrandChild extends Child - should get const
+    GrandChild:
+      allOf:
+        - $ref: '#/components/schemas/Child'
+        - type: object
+          properties:
+            grandChildProp:
+              type: string
+        - type: object
+          properties:
+            '@type':
+              const: GrandChild
+    
+    # Sibling also inherits from Parent but has no discriminator
+    Sibling:
+      allOf:
+        - $ref: '#/components/schemas/Parent'
+        - type: object
+          properties:
+            siblingProp:
+              type: number
+    
+    # ChildOneOf wraps the parent with its const
+    ChildOneOf:
+      allOf:
+        - $ref: '#/components/schemas/Child'
+        - type: object
+          properties:
+            '@type':
+              const: Child
+    
+    # ChildPolymorphic is the oneOf wrapper
+    ChildPolymorphic:
+      oneOf:
+        - $ref: '#/components/schemas/ChildOneOf'
+        - $ref: '#/components/schemas/GrandChild'
+      discriminator:
+        propertyName: '@type'
+        mapping:
+          Child: '#/components/schemas/ChildOneOf'
+          GrandChild: '#/components/schemas/GrandChild'

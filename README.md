@@ -76,23 +76,25 @@ Specifically, it:
 2. Finds concrete schemas that extend the base via allOf
 3. Optionally adds a const property to each concrete schema matching its discriminator value (enabled by default)
 4. Creates a new oneOf wrapper schema containing all concrete types
-5. Replaces references to the base schema with the wrapper schema (in polymorphic contexts)
+5. Replaces references to the base schema with the wrapper schema (outside of allOf composition contexts)
+6. Removes discriminators from base schemas that received wrappers
+7. Optionally merges nested oneOf schemas by inlining references to schemas that only contain oneOf
 
 ```
 oas-utils allof-to-oneof <input.yaml> -o output.yaml
-# Optionally remove discriminator from base schema
-oas-utils allof-to-oneof <input.yaml> -o output.yaml --remove-discriminator-from-base
 # Optionally skip adding const to specialization schemas
 oas-utils allof-to-oneof <input.yaml> -o output.yaml --no-add-discriminator-const
 # Optionally skip transformation if only one specialization is found
 oas-utils allof-to-oneof <input.yaml> -o output.yaml --ignore-single-specialization
+# Optionally merge nested oneOf schemas
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --merge-nested-oneof
 ```
 
 Options:
 - -o, --output: write result to this file (defaults to stdout).
-- --remove-discriminator-from-base: remove the discriminator from base schemas after conversion.
 - --no-add-discriminator-const: do not add const property with discriminator value to specialization schemas.
 - --ignore-single-specialization: skip oneOf transformation if only one specialization is found (useful for bases with only one concrete implementation).
+- --merge-nested-oneof: merge nested oneOf schemas by inlining references to schemas that only contain oneOf.
 
 Example transformation (with addDiscriminatorConst enabled, the default):
 - Base schema `Animal` with discriminator `type` and mapping `{Cat: ..., Dog: ...}`
@@ -195,7 +197,6 @@ decorators:
 
   # Convert allOf + discriminator to oneOf + discriminator
   oas-utils/allof-to-oneof:
-    removeDiscriminatorFromBase: false
     addDiscriminatorConst: true
     ignoreSingleSpecialization: false
 
@@ -233,7 +234,7 @@ import {
 removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
 
 // Convert allOf + discriminator to oneOf + discriminator
-allOfToOneOf(doc, { removeDiscriminatorFromBase: false, addDiscriminatorConst: true });
+allOfToOneOf(doc, { addDiscriminatorConst: true, mergeNestedOneOf: false });
 
 // Clean up discriminator mappings
 const result = cleanupDiscriminatorMappings(doc);
