@@ -189,6 +189,7 @@ export async function runAllOfToOneOf(
     addDiscriminatorConst: opts.addDiscriminatorConst !== false,
     ignoreSingleSpecialization: Boolean(opts.ignoreSingleSpecialization),
     mergeNestedOneOf: Boolean(opts.mergeNestedOneof),
+    onWarning: (msg) => console.warn(`[WARN] ${msg}`),
   };
 
   allOfToOneOf(doc, topts);

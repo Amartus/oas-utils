@@ -12,7 +12,7 @@ describe('Inheritance-only parent schema', () => {
     expect(result.components.schemas.ParentPolymorphic).toBeUndefined();
     expect(result.components.schemas.ParentOneOf).toBeUndefined();
 
-    // Parent should not have discriminator removed since it's not being wrapped
+    // Parent's discriminator should be removed even though it's not being wrapped
     expect(result.components.schemas.Parent.discriminator).toBeUndefined();
   });
 

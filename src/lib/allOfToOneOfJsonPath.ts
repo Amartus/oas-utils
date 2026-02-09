@@ -140,7 +140,6 @@ function isReferencedOutsideComposition(
 ): boolean {
   const schemaRef = `#/components/schemas/${schemaName}`;
   const usageContexts = new Set(['oneOf', 'anyOf', 'properties', 'items', 'schema']);
-  const inheritanceContexts = new Set(['allOf', 'discriminator', 'mapping']);
 
   const allRefs = JSONPath({
     path: '$..$ref',
@@ -352,10 +351,9 @@ function createPolymorphicWrappers(
     }
   }
 
-  if (allWarnings.length > 0) {
-    console.warn('Warnings during allOf to oneOf conversion:');
+  if (allWarnings.length > 0 && opts.onWarning) {
     for (const warning of allWarnings) {
-      console.warn(`  - ${warning}`);
+      opts.onWarning(warning);
     }
   }
 
@@ -452,17 +450,18 @@ function replaceReferencesWithWrappers(
 
   const replaceRefs = (obj: Record<string, unknown>): void => {
     if (!obj) return;
-    JSONPath({
+    const results = JSONPath({
       path: '$..$ref',
       json: obj,
       resultType: 'all',
-      callback: (result: JSONPathResult) => {
-        const replacement = typeof result.value === 'string' ? replacementMap.get(result.value) : undefined;
-        if (replacement) {
-          result.parent[result.parentProperty] = replacement;
-        }
+    }) as JSONPathResult[];
+
+    for (const result of results) {
+      const replacement = typeof result.value === 'string' ? replacementMap.get(result.value) : undefined;
+      if (replacement && result.parent && result.parentProperty !== undefined) {
+        (result.parent as Record<string, unknown>)[result.parentProperty as keyof typeof result.parent] = replacement;
       }
-    });
+    }
   };
 
   // Process schemas separately to preserve allOf/anyOf/oneOf inheritance

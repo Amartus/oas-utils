@@ -10,6 +10,8 @@ export interface AllOfToOneOfOptions {
   ignoreSingleSpecialization?: boolean;
   /** If true, merge nested oneOf schemas by inlining references to schemas that only contain oneOf (default: false) */
   mergeNestedOneOf?: boolean;
+  /** Optional callback to receive warnings during transformation. If not provided, warnings are silently ignored. */
+  onWarning?: (message: string) => void;
 }
 
 /**
