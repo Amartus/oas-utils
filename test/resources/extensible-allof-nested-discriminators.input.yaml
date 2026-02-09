@@ -1,0 +1,104 @@
+openapi: 3.0.0
+info:
+  title: Animal API with Extensible Base and Nested Discriminators
+  version: 1.0.0
+  description: API demonstrating oneOf with allOf to Extensible base and nested discriminators
+
+paths:
+  /animals:
+    get:
+      operationId: listAnimals
+      summary: Get all animals
+      description: Returns animals or animal references using discriminator
+      responses:
+        "200":
+          description: Animal or animal reference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimalOrRef"
+
+components:
+  schemas:
+    Extensible:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+      description: Base extensible schema that defines the type property
+
+    Animal:
+      allOf:
+        - $ref: "#/components/schemas/Extensible"
+        - type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            description:
+              type: string
+      discriminator:
+        propertyName: type
+        mapping:
+          Animal: "#/components/schemas/Animal"
+          Cat: "#/components/schemas/Cat"
+          Panthera: "#/components/schemas/Panthera"
+          Lion: "#/components/schemas/Lion"
+
+    AnimalRef:
+      allOf:
+        - $ref: "#/components/schemas/Extensible"
+        - type: object
+          required:
+            - $ref
+          properties:
+            $ref:
+              type: string
+    Cat:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+      discriminator:
+        propertyName: type
+        mapping:
+          Cat: "#/components/schemas/Cat"
+          Panthera: "#/components/schemas/Panthera"
+          Lion: "#/components/schemas/Lion"
+
+    Lion:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          required:
+            - maneSize
+          properties:
+            maneSize:
+              type: string
+              enum:
+                - small
+                - medium
+                - large
+
+    Panthera:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          required:
+            - spotPattern
+          properties:
+            spotPattern:
+              type: string
+
+    AnimalOrRef:
+      oneOf:
+        - $ref: "#/components/schemas/Animal"
+        - $ref: "#/components/schemas/AnimalRef"
+      discriminator:
+        propertyName: type
+        mapping:
+          Animal: "#/components/schemas/Animal"
+          AnimalRef: "#/components/schemas/AnimalRef"
+          Panthera: "#/components/schemas/Panthera"
+          Lion: "#/components/schemas/Lion"

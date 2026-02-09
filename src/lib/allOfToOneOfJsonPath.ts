@@ -1,6 +1,6 @@
 import { JSONPath } from 'jsonpath-plus';
 import { AllOfToOneOfOptions } from './allOfToOneOfInterface.js';
-import { refToName, buildInheritanceGraph } from './oasUtils.js';
+import { refToName, buildInheritanceGraph, getDescendants, getAncestors } from './oasUtils.js';
 
 /**
  * Third implementation of allOfToOneOf using JSONPath library.
@@ -80,7 +80,6 @@ interface JSONPathResult {
 
 interface ChildValidationResult {
   validChildren: string[];
-  allChildren: string[];
   warnings: string[];
 }
 
@@ -88,11 +87,8 @@ interface ChildValidationResult {
 const isValidObject = (obj: unknown): obj is Record<string, unknown> =>
   obj !== null && typeof obj === 'object' && !Array.isArray(obj);
 
-const isValidSchema = (schema: unknown): schema is SchemaObject =>
-  isValidObject(schema);
-
 const hasDiscriminator = (schema: unknown): schema is SchemaObject & { discriminator: DiscriminatorObject } =>
-  isValidSchema(schema) &&
+  isValidObject(schema) &&
   isValidObject(schema.discriminator) &&
   typeof schema.discriminator.propertyName === 'string' &&
   isValidObject(schema.discriminator.mapping);
@@ -101,7 +97,7 @@ const isSchemaReference = (obj: unknown): obj is SchemaReference =>
   isValidObject(obj) && typeof obj.$ref === 'string';
 
 /**
- * Step 1: Find all schemas with discriminators.
+ * Find all schemas with discriminators.
  * Only consider schemas with >1 mapping entry (actual polymorphic schemas).
  * Exclude schemas that are already oneOf wrappers.
  */
@@ -130,7 +126,7 @@ function findDiscriminatorParents(schemas: Record<string, SchemaObject>): Map<st
 }
 
 /**
- * Step 3: Check if a schema is referenced outside of allOf contexts (inheritance).
+ * Check if a schema is referenced outside of allOf contexts (inheritance).
  * References in oneOf/anyOf are considered polymorphic usage and should get wrappers.
  * Uses JSONPath to find all references and filters by context.
  */
@@ -139,7 +135,6 @@ function isReferencedOutsideComposition(
   doc: OpenAPIDocument
 ): boolean {
   const schemaRef = `#/components/schemas/${schemaName}`;
-  const usageContexts = new Set(['oneOf', 'anyOf', 'properties', 'items', 'schema']);
 
   const allRefs = JSONPath({
     path: '$..$ref',
@@ -158,31 +153,19 @@ function isReferencedOutsideComposition(
       .split('.')
       .filter(Boolean);
 
-    // Look backwards for context
-    let inAllOf = -1;
-    let inDiscriminatorMapping = -1;
-    let inUsageContext = -1;
+    let inAllOf = false;
+    let inDiscriminatorMapping = false;
 
     for (let i = pathParts.length - 1; i >= 0; i--) {
       const part = pathParts[i];
-      if (inAllOf === -1 && part === 'allOf') {
-        inAllOf = i;
-      }
-      if (inDiscriminatorMapping === -1 && (part === 'discriminator' || part === 'mapping')) {
-        inDiscriminatorMapping = i;
-      }
-      if (inUsageContext === -1 && usageContexts.has(part)) {
-        inUsageContext = i;
-      }
-      if (inAllOf !== -1 && inDiscriminatorMapping !== -1 && inUsageContext !== -1) break;
+      if (!inAllOf && part === 'allOf') inAllOf = true;
+      if (!inDiscriminatorMapping && (part === 'discriminator' || part === 'mapping')) inDiscriminatorMapping = true;
+      if (inAllOf && inDiscriminatorMapping) break;
     }
 
     // Skip if in allOf (pure inheritance) or in discriminator mapping (metadata)
-    if (inAllOf !== -1 || inDiscriminatorMapping !== -1) {
-      continue;
-    }
+    if (inAllOf || inDiscriminatorMapping) continue;
 
-    // If in a usage context or neither, it's actual usage
     return true;
   }
 
@@ -190,7 +173,7 @@ function isReferencedOutsideComposition(
 }
 
 /**
- * Step 4: Validate and get children for a parent.
+ * Validate and get children for a parent.
  * Returns valid inheriting children separately from all mapped children.
  */
 function validateAndGetChildren(
@@ -200,9 +183,8 @@ function validateAndGetChildren(
   inheritanceGraph: Map<string, Set<string>>
 ): ChildValidationResult {
   const validChildren: string[] = [];
-  const allChildren: string[] = [];
   const warnings: string[] = [];
-  const descendants = inheritanceGraph.get(parentName) || new Set<string>();
+  const descendants = getDescendants(parentName, inheritanceGraph);
 
   for (const [discriminatorValue, ref] of Object.entries(mapping)) {
     const childName = refToName(ref);
@@ -217,8 +199,6 @@ function validateAndGetChildren(
       continue;
     }
 
-    allChildren.push(childName);
-
     // Check if child inherits from parent (including self-reference)
     const inheritsFromParent = descendants.has(childName) || childName === parentName;
 
@@ -232,13 +212,26 @@ function validateAndGetChildren(
     }
   }
 
-  return { validChildren, allChildren, warnings };
+  return { validChildren, warnings };
 }
 
 /**
- * Step 4b: Create polymorphic wrappers for parents that are referenced.
+ * Create polymorphic wrappers for parents that are referenced.
  * This is the new type that is oneOf of the valid children. The original parent schema is kept as-is (without discriminator)
  */
+function isEligibleForWrapper(
+  parentName: string,
+  validChildren: string[],
+  doc: OpenAPIDocument,
+  opts: AllOfToOneOfOptions
+): boolean {
+  if (!isReferencedOutsideComposition(parentName, doc)) return false;
+  if (validChildren.length === 0) return false;
+  if (validChildren.length === 1 &&
+    (opts.ignoreSingleSpecialization || validChildren[0] === parentName)) return false;
+  return true;
+}
+
 function createPolymorphicWrappers(
   schemas: Record<string, SchemaObject>,
   discriminatorParents: Map<string, DiscriminatorInfo>,
@@ -249,109 +242,92 @@ function createPolymorphicWrappers(
   const wrappers = new Map<string, WrapperInfo>();
   const allWarnings: string[] = [];
 
-  const wrapperSuffix = 'Polymorphic';
-
-  // First pass: determine which schemas will get wrappers
+  // Pass 1: validate children and determine initial wrapper eligibility
   const schemasGettingWrappers = new Set<string>();
+  const validatedParents = new Map<string, ChildValidationResult>();
+
   for (const [parentName, discInfo] of discriminatorParents.entries()) {
-    const { validChildren } = validateAndGetChildren(
-      parentName,
-      discInfo.mapping,
-      schemas,
-      inheritanceGraph
-    );
+    const result = validateAndGetChildren(parentName, discInfo.mapping, schemas, inheritanceGraph);
+    validatedParents.set(parentName, result);
 
-    // Only create wrapper if schema is referenced outside allOf (actual usage)
-    // If it's only used for inheritance, children handle their own polymorphism
-    const isReferencedDirectly = isReferencedOutsideComposition(parentName, doc);
-
-    if (isReferencedDirectly && validChildren.length > 0) {
-      if (validChildren.length === 1 && (opts.ignoreSingleSpecialization || validChildren[0] === parentName)) {
-        continue;
-      }
+    if (isEligibleForWrapper(parentName, result.validChildren, doc, opts)) {
       schemasGettingWrappers.add(parentName);
     }
   }
 
-  function createWrapper(parentName: string, discInfo: DiscriminatorInfo, validChildren: string[]): SchemaObject | undefined {
-    // Only create wrapper if schema is referenced outside allOf (actual usage)
-    // If it's only used for inheritance, children handle their own polymorphism
-    const isReferencedDirectly = isReferencedOutsideComposition(parentName, doc);
+  // Pass 2: create wrappers for eligible parents.
+  // Re-check eligibility for initially-ineligible schemas since prior wrapper
+  // creation may add new $refs that make them referenced outside composition.
+  for (const [parentName, discInfo] of discriminatorParents.entries()) {
+    const { validChildren, warnings } = validatedParents.get(parentName)!;
+    allWarnings.push(...warnings);
 
-    if (!isReferencedDirectly || validChildren.length === 0) {
-      return;
-    }
-    if (validChildren.length === 1) {
-      if (opts.ignoreSingleSpecialization || (validChildren[0] === parentName)) {
-        return;
-      }
+    if (!schemasGettingWrappers.has(parentName)) {
+      if (!isEligibleForWrapper(parentName, validChildren, doc, opts)) continue;
+      schemasGettingWrappers.add(parentName);
     }
 
-    // Build a map from concrete schema names to their discriminator values BEFORE modifying mapping
-    const schemaToDiscriminatorValue = new Map<string, string>();
-    for (const [value, ref] of Object.entries(discInfo.mapping)) {
-      if (typeof ref === 'string') {
-        const schemaName = refToName(ref);
-        if (schemaName && validChildren.includes(schemaName)) {
-          schemaToDiscriminatorValue.set(schemaName, value);
+    // When mergeNestedOneOf is enabled, include only children whose
+    // ancestry path to this parent has no intermediate with its own wrapper.
+    let childrenForWrapper = validChildren;
+    if (opts.mergeNestedOneOf) {
+      const included = new Set<string>();
+      included.add(parentName); // Always include self-reference if present
+      const descendants = getDescendants(parentName, inheritanceGraph);
+
+      for (const childName of validChildren) {
+        if (childName === parentName) continue;
+        const ancestors = getAncestors(childName, schemas);
+        // Only consider intermediates that are between parent and child
+        // (must be both a descendant of parent and an ancestor of child)
+        const hasIntermediateWrapper = [...ancestors].some(a =>
+          a !== parentName && descendants.has(a) && schemasGettingWrappers.has(a)
+        );
+        if (!hasIntermediateWrapper) {
+          included.add(childName);
         }
       }
+      childrenForWrapper = validChildren.filter(name => included.has(name));
     }
 
-    // Add const properties (creates wrapper for parent self-reference)
-    // Do this BEFORE building oneOf so we can use the updated mapping
+    // Build reverse map: schema name -> discriminator value (before any mutations)
+    const schemaToDiscriminatorValue = new Map<string, string>();
+    for (const [value, ref] of Object.entries(discInfo.mapping)) {
+      const schemaName = refToName(ref);
+      if (schemaName && childrenForWrapper.includes(schemaName)) {
+        schemaToDiscriminatorValue.set(schemaName, value);
+      }
+    }
+
+    // Optionally add const constraints to children (before building oneOf so mapping stays current)
     if (opts.addDiscriminatorConst !== false) {
-      const result = addDiscriminatorConstToChildren(schemas, validChildren, discInfo, parentName, schemasGettingWrappers);
-      // Update the mapping if it changed
+      const result = addDiscriminatorConstToChildren(schemas, childrenForWrapper, discInfo, parentName, schemasGettingWrappers);
       if (result.updatedMapping) {
         discInfo.mapping = result.updatedMapping;
       }
     }
 
-    // Build oneOf using the (potentially updated) mapping values
-    const oneOfRefs: SchemaReference[] = validChildren.map(name => {
-      // Find the discriminator value for this schema
+    // Build oneOf refs using the (potentially updated) mapping
+    const oneOfRefs: SchemaReference[] = childrenForWrapper.map(name => {
       const discValue = schemaToDiscriminatorValue.get(name);
       if (discValue && discInfo.mapping[discValue]) {
-        // Use the (potentially updated) mapping value
         return { $ref: discInfo.mapping[discValue] };
       }
-      // Fallback to direct reference if not found in mapping
       return { $ref: `#/components/schemas/${name}` };
     });
 
-    const wrapperSchema: SchemaObject = {
+    const wrapperName = `${parentName}Polymorphic`;
+    schemas[wrapperName] = {
       oneOf: oneOfRefs,
       discriminator: {
         propertyName: discInfo.propertyName,
-        mapping: discInfo.mapping  // Use updated mapping
+        mapping: discInfo.mapping
       }
     };
-
-    return wrapperSchema;
+    wrappers.set(parentName, { wrapperName, childNames: validChildren });
   }
 
-  for (const [parentName, discInfo] of discriminatorParents.entries()) {
-    // Validate and get children FIRST
-    const { validChildren, warnings } = validateAndGetChildren(
-      parentName,
-      discInfo.mapping,
-      schemas,
-      inheritanceGraph
-    );
-
-    allWarnings.push(...warnings);
-
-    const wrapperSchema = createWrapper(parentName, discInfo, validChildren);
-
-    if (wrapperSchema) {
-      const wrapperName = `${parentName}${wrapperSuffix}`;
-      schemas[wrapperName] = wrapperSchema;
-      wrappers.set(parentName, { wrapperName, childNames: validChildren });
-    }
-  }
-
-  if (allWarnings.length > 0 && opts.onWarning) {
+  if (opts.onWarning) {
     for (const warning of allWarnings) {
       opts.onWarning(warning);
     }
@@ -361,7 +337,7 @@ function createPolymorphicWrappers(
 }
 
 /**
- * Step 5: Add const constraints to children.
+ * Add const constraints to children.
  * For parent self-references, creates a wrapper schema with allOf + const.
  */
 function addDiscriminatorConstToChildren(
@@ -419,7 +395,7 @@ function addDiscriminatorConstToChildren(
 
     const constExists = childSchema.allOf.some(
       (item): item is SchemaObject =>
-        isValidSchema(item) &&
+        isValidObject(item) &&
         isValidObject(item.properties) &&
         isValidObject(item.properties[discInfo.propertyName]) &&
         (item.properties[discInfo.propertyName] as Record<string, unknown>).const === discriminatorValue
@@ -434,7 +410,7 @@ function addDiscriminatorConstToChildren(
 }
 
 /**
- * Step 6: Replace references using JSONPath.
+ * Replace references using JSONPath.
  * Replace all non-composition references from parent to wrapper.
  */
 function replaceReferencesWithWrappers(
@@ -468,7 +444,7 @@ function replaceReferencesWithWrappers(
   const schemas = doc.components?.schemas;
   if (isValidObject(schemas)) {
     for (const schema of Object.values(schemas)) {
-      if (!isValidSchema(schema)) continue;
+      if (!isValidObject(schema)) continue;
 
       // Preserve composition arrays - replace refs only in non-composition parts
       const { allOf, anyOf, oneOf, ...schemaWithoutComposition } = schema;
@@ -492,7 +468,7 @@ function replaceReferencesWithWrappers(
 }
 
 /**
- * Step 7: Chain polymorphic wrappers.
+ * Chain polymorphic wrappers.
  * If a wrapper's oneOf references another polymorphic parent, redirect to that parent's wrapper.
  */
 function chainPolymorphicWrappers(
@@ -522,10 +498,14 @@ function chainPolymorphicWrappers(
  * Update existing oneOf schemas to reference polymorphic wrappers.
  * This handles pre-existing oneOf schemas (not created by this transform) that reference
  * schemas which got polymorphic wrappers.
+ * 
+ * When mergeNestedOneOf is enabled, skip this step for pre-existing oneOf schemas
+ * as they will be handled by post-processing expansion instead.
  */
 function updateExistingOneOfReferences(
   schemas: Record<string, SchemaObject>,
-  wrappers: Map<string, WrapperInfo>
+  wrappers: Map<string, WrapperInfo>,
+  opts: AllOfToOneOfOptions = {}
 ): void {
   if (wrappers.size === 0) return;
 
@@ -540,8 +520,12 @@ function updateExistingOneOfReferences(
   };
 
   for (const [schemaName, schema] of Object.entries(schemas)) {
-    if (!isValidSchema(schema) || !Array.isArray(schema.oneOf)) continue;
+    if (!isValidObject(schema) || !Array.isArray(schema.oneOf)) continue;
     if (createdWrappers.has(schemaName)) continue;
+
+    // When mergeNestedOneOf is enabled, skip updating pre-existing oneOf references
+    // They will be expanded with discriminator children in post-processing
+    if (opts.mergeNestedOneOf && schema.discriminator?.mapping) continue;
 
     // Update oneOf references
     schema.oneOf = schema.oneOf.map((entry): SchemaReference | SchemaObject =>
@@ -558,139 +542,175 @@ function updateExistingOneOfReferences(
 }
 
 /**
- * Step 8: Remove discriminators from parent schemas.
+ * Remove discriminators from parent schemas.
+ * Preserves discriminators on created wrapper schemas.
  */
 function removeDiscriminatorFromParents(
   schemas: Record<string, SchemaObject>,
   wrappers: Map<string, WrapperInfo>,
   doc: OpenAPIDocument
 ): void {
-  // Case 1: Remove from schemas that got wrappers
+  // Get names of created wrappers - these keep their discriminators
+  const wrapperNames = new Set(Array.from(wrappers.values()).map(w => w.wrapperName));
+
+  // Remove discriminators from original parent schemas that have wrappers
   for (const parentName of wrappers.keys()) {
     delete schemas[parentName]?.discriminator;
   }
 
-  // Case 2: Remove from schemas that didn't get wrappers but have wrapped children
+  // Collect all children covered by any wrapper
+  const allWrapperChildren = new Set<string>();
+  for (const info of wrappers.values()) {
+    for (const child of info.childNames) {
+      allWrapperChildren.add(child);
+    }
+  }
+
+  // Remove discriminators from non-wrapper schemas that only serve as inheritance
+  // (they have wrapped children and aren't directly referenced outside composition)
   for (const [schemaName, schema] of Object.entries(schemas)) {
-    if (!hasDiscriminator(schema) || wrappers.has(schemaName)) continue;
+    if (!hasDiscriminator(schema) || wrappers.has(schemaName) || wrapperNames.has(schemaName)) continue;
     if (isReferencedOutsideComposition(schemaName, doc)) continue;
 
-    // Check if any child has a wrapper
-    const hasWrappedChild = Object.values(schema.discriminator.mapping)
-      .some(ref => {
-        const childName = typeof ref === 'string' ? refToName(ref) : null;
-        return childName && wrappers.has(childName);
-      });
+    const hasWrappedChild = Object.values(schema.discriminator.mapping).some(ref => {
+      const childName = refToName(ref);
+      return childName && (wrappers.has(childName) || allWrapperChildren.has(childName));
+    });
 
     if (hasWrappedChild) {
-      // Use Reflect to delete the optional property
-      Reflect.deleteProperty(schema, 'discriminator');
+      delete (schema as SchemaObject).discriminator;
     }
   }
 }
 
 /**
- * Step 9: Merge nested oneOf schemas (optional).
+ * Merge nested oneOf schemas (post-processing).
+ * 
+ * When mergeNestedOneOf is enabled:
+ * 1. Expands pre-existing oneOf arrays to include all discriminator.mapping children
+ * 2. Flattens nested oneOf references by replacing wrapper refs with their contents
+ *    (only when discriminator propertyNames match)
  */
-function mergeNestedOneOfSchemas(schemas: Record<string, SchemaObject>): void {
+function mergeNestedOneOfSchemas(schemas: Record<string, SchemaObject>, wrappers: Map<string, WrapperInfo>): void {
   if (!isValidObject(schemas)) return;
 
-  // Identify simple oneOf wrappers
-  const simpleOneOfSchemas = new Set(
-    Object.entries(schemas)
-      .filter(([_, schema]) => isSimpleOneOfSchema(schema))
-      .map(([name, _]) => name)
-  );
+  const wrapperNames = new Set(Array.from(wrappers.values()).map(w => w.wrapperName));
 
-  if (simpleOneOfSchemas.size === 0) return;
+  // Step 1: Expand pre-existing oneOf to include discriminator children
+  for (const [schemaName, schema] of Object.entries(schemas)) {
+    if (!isValidObject(schema) || !Array.isArray(schema.oneOf) || !schema.discriminator?.mapping) continue;
 
-  // Merge nested oneOf
-  for (const schema of Object.values(schemas)) {
-    if (!isValidSchema(schema) || !Array.isArray(schema.oneOf)) continue;
+    const currentRefs = new Set(
+      schema.oneOf
+        .filter(isSchemaReference)
+        .map(ref => refToName(ref.$ref))
+        .filter((name): name is string => name !== null)
+    );
 
-    // First pass: collect discriminator property names from candidate children
-    const candidatePropertyNames = new Set<string>();
+    const toAdd: string[] = [];
+
+    // Check each referenced schema for additional discriminator children
     for (const entry of schema.oneOf) {
-      const refName = isSchemaReference(entry) ? refToName(entry.$ref) : null;
-      if (!refName || !simpleOneOfSchemas.has(refName)) continue;
+      if (!isSchemaReference(entry)) continue;
+      const refName = refToName(entry.$ref);
+      if (!refName) continue;
 
-      const referencedSchema = schemas[refName];
-      if (referencedSchema?.discriminator?.propertyName) {
-        candidatePropertyNames.add(referencedSchema.discriminator.propertyName);
+      const refSchema = schemas[refName];
+      
+      // Only expand from schemas with matching propertyName
+      if (refSchema?.discriminator?.propertyName === schema.discriminator?.propertyName && refSchema.discriminator?.mapping) {
+        for (const [key, childRef] of Object.entries(refSchema.discriminator.mapping)) {
+          if (typeof childRef === 'string') {
+            const childName = refToName(childRef);
+            if (childName && !currentRefs.has(childName) && schemas[childName]) {
+              toAdd.push(childName);
+              currentRefs.add(childName);
+              // Add to parent's mapping
+              if (schema.discriminator?.mapping && !schema.discriminator.mapping[key]) {
+                schema.discriminator.mapping[key] = childRef;
+              }
+            }
+          }
+        }
       }
     }
 
-    // Only merge if all candidates use the same discriminator property name
-    const canMerge = candidatePropertyNames.size <= 1;
-    if (!canMerge) {
-      // Skip merging for this schema - children have conflicting discriminator property names
-      continue;
+    // Add discovered children to oneOf
+    for (const name of toAdd) {
+      schema.oneOf.push({ $ref: `#/components/schemas/${name}` });
+    }
+  }
+
+  // Step 2: Flatten nested oneOf references
+  for (const [schemaName, schema] of Object.entries(schemas)) {
+    if (!isValidObject(schema) || !Array.isArray(schema.oneOf)) continue;
+
+    const mappingRefs = new Set<string>();
+    if (schema.discriminator?.mapping) {
+      for (const ref of Object.values(schema.discriminator.mapping)) {
+        if (typeof ref === 'string') mappingRefs.add(ref);
+      }
     }
 
-    let modified = false;
     const newOneOf: Array<SchemaReference | SchemaObject> = [];
-    const mergedMappings: Record<string, string> = {};
-    const discriminatorPropertyNames = new Set<string>();
+    const newMappings: Record<string, string> = {};
+    let changed = false;
 
     for (const entry of schema.oneOf) {
-      const refName = isSchemaReference(entry) ? refToName(entry.$ref) : null;
-
-      if (!refName || !simpleOneOfSchemas.has(refName)) {
+      if (!isSchemaReference(entry)) {
         newOneOf.push(entry);
         continue;
       }
 
-      // Inline the referenced oneOf
-      const referencedSchema = schemas[refName];
-      if (Array.isArray(referencedSchema?.oneOf)) {
-        newOneOf.push(...referencedSchema.oneOf);
-        Object.assign(mergedMappings, referencedSchema.discriminator?.mapping || {});
-
-        // Track discriminator property name
-        if (referencedSchema.discriminator?.propertyName) {
-          discriminatorPropertyNames.add(referencedSchema.discriminator.propertyName);
-        }
-
-        modified = true;
-      } else {
+      const refName = refToName(entry.$ref);
+      if (!refName) {
         newOneOf.push(entry);
+        continue;
       }
+
+      const refSchema = schemas[refName];
+      
+      // Try to flatten if nested schema is a oneOf with matching propertyName
+      if (isValidObject(refSchema) && Array.isArray(refSchema.oneOf) &&
+          refSchema.discriminator?.propertyName === schema.discriminator?.propertyName) {
+        
+        // Check if all children from nested schema exist in parent's mapping
+        const allChildrenInMapping = (refSchema.discriminator?.mapping
+          ? Object.values(refSchema.discriminator.mapping).every(ref => 
+              typeof ref === 'string' && mappingRefs.has(ref))
+          : refSchema.oneOf.every(child => 
+              isSchemaReference(child) && mappingRefs.has(child.$ref)));
+
+        if (allChildrenInMapping) {
+          // Promote children
+          newOneOf.push(...refSchema.oneOf);
+          if (refSchema.discriminator?.mapping) {
+            Object.assign(newMappings, refSchema.discriminator.mapping);
+          }
+          changed = true;
+          continue;
+        }
+      }
+
+      newOneOf.push(entry);
     }
 
-    if (modified) {
-      // Remove duplicates by key
-      const uniqueRefs = new Map(
-        newOneOf.map(entry => [entry?.$ref || JSON.stringify(entry), entry])
+    if (changed) {
+      // Remove duplicates
+      const unique = new Map(
+        newOneOf.map(e => [
+          isSchemaReference(e) ? e.$ref : JSON.stringify(e),
+          e
+        ])
       );
-      schema.oneOf = Array.from(uniqueRefs.values());
-
-      // Merge discriminator mappings
-      if (Object.keys(mergedMappings).length > 0) {
-        // Use the common property name from children, or default to 'type'
-        const propertyName = discriminatorPropertyNames.size === 1
-          ? Array.from(discriminatorPropertyNames)[0]
-          : 'type';
-
-        schema.discriminator = schema.discriminator || { propertyName, mapping: {} };
-        schema.discriminator.mapping = { ...schema.discriminator.mapping, ...mergedMappings };
+      schema.oneOf = Array.from(unique.values());
+      
+      // Merge new mappings
+      if (Object.keys(newMappings).length > 0 && schema.discriminator) {
+        schema.discriminator.mapping = { ...schema.discriminator.mapping, ...newMappings };
       }
     }
   }
-}
-
-/**
- * Check if a schema is a simple oneOf wrapper.
- */
-function isSimpleOneOfSchema(schema: unknown): schema is SchemaObject {
-  if (!isValidSchema(schema) || !Array.isArray(schema.oneOf) || schema.oneOf.length === 0) {
-    return false;
-  }
-
-  const allowedKeys = new Set(['oneOf', 'discriminator', 'description']);
-  const disallowedProps = ['allOf', 'anyOf', 'properties', 'type'];
-
-  return Object.keys(schema).every(key => allowedKeys.has(key)) &&
-    disallowedProps.every(prop => !schema[prop]);
 }
 
 /**
@@ -712,12 +732,16 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
   if (wrappers.size > 0) {
     replaceReferencesWithWrappers(doc, wrappers);
     chainPolymorphicWrappers(schemas, wrappers);
-    updateExistingOneOfReferences(schemas, wrappers);
-    removeDiscriminatorFromParents(schemas, wrappers, doc);
+    updateExistingOneOfReferences(schemas, wrappers, opts);
   }
 
+  // Merge nested oneOf BEFORE removing discriminators so mapping info is available
   if (opts.mergeNestedOneOf) {
-    mergeNestedOneOfSchemas(schemas);
+    mergeNestedOneOfSchemas(schemas, wrappers);
+  }
+
+  if (wrappers.size > 0) {
+    removeDiscriminatorFromParents(schemas, wrappers, doc);
   }
 
   return doc;

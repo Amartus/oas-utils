@@ -1,0 +1,93 @@
+openapi: 3.1.0
+info:
+  title: Extensible Product API
+  version: 1.0.0
+
+paths:
+  /products:
+    get:
+      summary: Retrieve animal (accepts extensible request body)
+      description: Minimal example where GET consumes a request body referencing an Animal.
+      requestBody:
+        $ref: "#/components/requestBodies/AnimalWrapperRequest"
+      responses:
+        "200":
+          description: Echoed animal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Animal"
+
+components:
+  schemas:
+    Extensible:
+      type: object
+      properties:
+        "@type":
+          type: string
+      required:
+        - "@type"
+    Animal:
+      allOf:
+        - $ref: "#/components/schemas/Extensible"
+        - type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+      discriminator:
+        propertyName: "@type"
+        mapping:
+          Panthera: "#/components/schemas/Panthera"
+          Lion: "#/components/schemas/Lion"
+          Kitty: "#/components/schemas/Kitty"
+    Cat:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+      discriminator:
+        propertyName: "@type"
+        mapping:
+          Panthera: "#/components/schemas/Panthera"
+          Lion: "#/components/schemas/Lion"
+          Kitty: "#/components/schemas/Kitty"
+    Panthera:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          properties:
+            breed:
+              type: string
+    Lion:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          properties:
+            maneSize:
+              type: string
+              enum: [small, medium, large]
+    Kitty:
+      allOf:
+        - $ref: "#/components/schemas/Cat"
+        - type: object
+          properties:
+            wingSpan:
+              type: string
+    AnimalWrapper:
+      type: object
+      properties:
+        "@type":
+          type: string
+        animal:
+          $ref: "#/components/schemas/Animal"
+      required:
+        - "@type"
+        - animal
+  requestBodies:
+    AnimalWrapperRequest:
+      description: Extensible wrapper carrying an Animal
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AnimalWrapper"
