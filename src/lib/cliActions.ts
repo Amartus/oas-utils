@@ -239,7 +239,7 @@ export async function runSealSchema(
  * @param reader - Function to read input
  */
 export async function runCleanupDiscriminators(
-  opts: { output?: string },
+  opts: { output?: string; removePatterns?: string[] },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -247,7 +247,13 @@ export async function runCleanupDiscriminators(
 
   if (!validateComponentSchemas(doc)) return;
 
-  const result = cleanupDiscriminatorMappings(doc);
+  const result = cleanupDiscriminatorMappings(doc, {
+    removeDiscriminatorPatterns: opts.removePatterns
+  });
+
+  if (result.discriminatorsRemoved > 0) {
+    console.error(`[CLEANUP-DISCRIMINATORS] Removed ${result.discriminatorsRemoved} discriminator(s) entirely from schemas: [${result.removedDiscriminators.join(", ")}]`);
+  }
 
   if (result.schemasChecked > 0) {
     console.error(`[CLEANUP-DISCRIMINATORS] Checked ${result.schemasChecked} schema(s) with discriminators.`);

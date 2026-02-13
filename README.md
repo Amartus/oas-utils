@@ -105,16 +105,19 @@ Example transformation (with addDiscriminatorConst enabled, the default):
 
 ### cleanup-discriminators
 
-Clean up discriminator mappings by removing entries that reference non-existent schemas. This is useful when schemas are removed but discriminator mappings are not updated, leaving dangling references.
+Clean up discriminator mappings by removing entries that reference non-existent schemas. This is useful when schemas are removed but discriminator mappings are not updated, leaving dangling references. Optionally, remove entire discriminators from schemas matching specified patterns.
 
 ```
 oas-utils cleanup-discriminators <input.yaml> -o output.yaml
 # Read from stdin and write to stdout
 cat openapi.yaml | oas-utils cleanup-discriminators > cleaned.yaml
+# Remove discriminators from schemas matching patterns
+oas-utils cleanup-discriminators spec.yaml --remove-patterns "*_RES" "*Response" -o output.yaml
 ```
 
 Options:
 - -o, --output: write result to this file (defaults to stdout).
+- --remove-patterns: schema name patterns for which discriminators should be removed entirely (supports glob-style wildcards like `*`).
 
 Example:
 - Original discriminator mapping: `{cat: '#/components/schemas/Cat', dog: '#/components/schemas/Dog', bird: '#/components/schemas/Bird'}`
@@ -219,7 +222,11 @@ decorators:
     ignoreSingleSpecialization: false
 
   # Clean up discriminator mappings
-  oas-utils/cleanup-discriminators: {}
+  oas-utils/cleanup-discriminators:
+    # Optional: remove discriminators from schemas matching these patterns
+    # removeDiscriminatorPatterns:
+    #   - '*_RES'
+    #   - '*Response'
 
   # Remove dangling $ref entries that point to missing component schemas
   oas-utils/remove-dangling-refs: {}
@@ -261,6 +268,13 @@ allOfToOneOf(doc, { addDiscriminatorConst: true, mergeNestedOneOf: false });
 // Clean up discriminator mappings
 const result = cleanupDiscriminatorMappings(doc);
 console.log(`Removed ${result.mappingsRemoved} invalid mappings from ${result.schemasChecked} schemas`);
+
+// Clean up discriminator mappings and remove discriminators from schemas matching patterns
+const resultWithPatterns = cleanupDiscriminatorMappings(doc, {
+  removeDiscriminatorPatterns: ['*_RES', '*Response']
+});
+console.log(`Removed ${resultWithPatterns.discriminatorsRemoved} discriminator(s) from matching schemas`);
+console.log(`Removed schemas: ${resultWithPatterns.removedDiscriminators.join(', ')}`);
 
 // Seal object schemas
 sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });

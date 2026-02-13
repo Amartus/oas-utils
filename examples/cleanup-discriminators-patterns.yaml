@@ -1,0 +1,120 @@
+openapi: 3.1.0
+info:
+  title: Example API with Discriminators
+  version: 1.0.0
+paths:
+  /animals:
+    get:
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Animal_RES"
+  /vehicles:
+    get:
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleResponse"
+  /people:
+    get:
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Person"
+components:
+  schemas:
+    Animal_RES:
+      type: object
+      properties:
+        type:
+          type: string
+      discriminator:
+        propertyName: type
+        mapping:
+          cat: "#/components/schemas/Cat"
+          dog: "#/components/schemas/Dog"
+
+    VehicleResponse:
+      type: object
+      properties:
+        kind:
+          type: string
+      discriminator:
+        propertyName: kind
+        mapping:
+          car: "#/components/schemas/Car"
+          truck: "#/components/schemas/Truck"
+
+    Person:
+      type: object
+      properties:
+        type:
+          type: string
+      discriminator:
+        propertyName: type
+        mapping:
+          employee: "#/components/schemas/Employee"
+          customer: "#/components/schemas/Customer"
+
+    Cat:
+      type: object
+      properties:
+        type:
+          type: string
+          const: cat
+        meow:
+          type: boolean
+
+    Dog:
+      type: object
+      properties:
+        type:
+          type: string
+          const: dog
+        bark:
+          type: boolean
+
+    Car:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: car
+        doors:
+          type: number
+
+    Truck:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: truck
+        capacity:
+          type: number
+
+    Employee:
+      type: object
+      properties:
+        type:
+          type: string
+          const: employee
+        employeeId:
+          type: string
+
+    Customer:
+      type: object
+      properties:
+        type:
+          type: string
+          const: customer
+        customerId:
+          type: string

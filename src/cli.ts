@@ -194,10 +194,15 @@ program
     "-o, --output <file>",
     "Write result to this file (defaults to stdout)"
   )
+  .option(
+    "--remove-patterns <patterns...>",
+    "Schema name patterns for which discriminators should be removed entirely (e.g., *_RES)",
+    []
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string }
+      opts: { output?: string; removePatterns?: string[] }
     ) => {
       try {
         await runCleanupDiscriminators(opts, format, () => reader(input));
