@@ -572,6 +572,13 @@ function removeDiscriminatorFromParents(
     if (!hasDiscriminator(schema) || wrappers.has(schemaName) || wrapperNames.has(schemaName)) continue;
     if (isReferencedOutsideComposition(schemaName, doc)) continue;
 
+    // Skip pre-existing oneOf schemas - preserve their discriminators
+    // Pre-existing oneOf schemas (those without allOf) should keep their discriminators
+    // even if they reference wrapped children from allOf→oneOf conversion
+    if (Array.isArray(schema.oneOf) && !Array.isArray(schema.allOf)) {
+      continue;
+    }
+
     const hasWrappedChild = Object.values(schema.discriminator.mapping).some(ref => {
       const childName = refToName(ref);
       return childName && (wrappers.has(childName) || allWrapperChildren.has(childName));

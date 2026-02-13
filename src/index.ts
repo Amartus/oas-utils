@@ -7,3 +7,4 @@ export * from './lib/oasUtils.js';
 export * from './lib/cleanupDiscriminatorMappings.js';
 export * from './lib/schemaTransformUtils.js';
 export * from './lib/removeDanglingRefs.js';
+export * from './lib/removeSingleComposition.js';

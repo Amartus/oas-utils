@@ -12,6 +12,7 @@ import { allOfToOneOf } from "./allOfToOneOfJsonPath.js";
 import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
 import { removeDanglingRefs } from "./removeDanglingRefs.js";
+import { removeSingleComposition } from "./removeSingleComposition.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -278,6 +279,35 @@ export async function runRemoveDangling(
     console.error(`[REMOVE-DANGLING] Removed ${result.removed} dangling $ref(s).`);
   } else {
     console.error(`[INFO] No dangling $ref entries found.`);
+  }
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Removes single-composition schemas (schemas whose only content is a single
+ * allOf/anyOf/oneOf with one $ref) and rewires all references to point directly
+ * to the target schema.
+ *
+ * @param opts - Options including output path
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runRemoveSingleComposition(
+  opts: { output?: string; aggressive?: boolean },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const doc = parseYamlOrJson(await reader());
+
+  if (!validateComponentSchemas(doc)) return;
+
+  const result = removeSingleComposition(doc, { aggressive: Boolean(opts.aggressive) });
+
+  if (result.schemasRemoved > 0) {
+    console.error(`[REMOVE-SINGLE-COMPOSITION] Removed ${result.schemasRemoved} single-composition schema(s): ${result.removed.join(", ")}`);
+  } else {
+    console.error("[INFO] No single-composition schemas found.");
   }
 
   await writeOutput(doc, opts.output, format);

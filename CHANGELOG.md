@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.0] - 2026-02-13
+### Added
+- `remove-single-composition` operation: removes single-composition wrapper schemas (schemas whose only content is a single `allOf`, `anyOf`, or `oneOf` with one `$ref`) and rewires all references to point directly to the target schema. Supports transitive chain resolution and discriminator mapping updates. Available as CLI command, Redocly decorator (`oas-utils/remove-single-composition`), and programmatic API (`removeSingleComposition`).
+
 ## [0.6.0] - 2026-02-09
 ### Breaking Changes
 - Rewrote `allOfToOneOf` using a JSONPath-based implementation, replacing the original recursive approach. The public API (`allOfToOneOf` function and CLI command) remains the same, but the internal module path changed from `allOfToOneOf.js` to `allOfToOneOfJsonPath.js`.

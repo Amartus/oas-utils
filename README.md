@@ -1,6 +1,6 @@
 # oas-utils
 
-Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, convert allOf + discriminator patterns to oneOf + discriminator, clean up discriminator mappings, and remove dangling `$ref` targets. Use them as a CLI or as Redocly decorators.
+Utilities for working with OpenAPI (OAS) documents. Includes tools to remove unused schemas, remove entries from oneOf, optimize allOf composition, convert allOf + discriminator patterns to oneOf + discriminator, clean up discriminator mappings, remove dangling `$ref` targets, and remove single-composition wrapper schemas. Use them as a CLI or as Redocly decorators.
 
 ## Definition of "unused schema"
 
@@ -121,6 +121,24 @@ Example:
 - After removing `Bird` schema: mapping entries `bird` is invalid
 - After cleanup: `{cat: '#/components/schemas/Cat', dog: '#/components/schemas/Dog'}`
 
+### remove-single-composition
+
+Remove single-composition wrapper schemas. A single-composition schema is one whose only content is a single `allOf`, `anyOf`, or `oneOf` containing exactly one `$ref`. Such schemas add indirection without semantic value and are replaced by their target reference.
+
+```
+oas-utils remove-single-composition <input.yaml> -o output.yaml
+# Read from stdin and write to stdout
+cat openapi.yaml | oas-utils remove-single-composition > cleaned.yaml
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+
+Example:
+- Schema `Foo` with `allOf: [{$ref: '#/components/schemas/Bar'}]`
+- `Foo` is removed and all references to `Foo` are replaced with `Bar`
+- Transitive chains are resolved: if `A`→`B`→`C` are all single-composition, both `A` and `B` are removed and references point to `C`
+
 ### seal-schema
 
 Seal object schemas to prevent additional properties. This ensures every final object shape exposed in the API is sealed (no additional properties allowed), without breaking schemas that are extended via `allOf`.
@@ -206,6 +224,9 @@ decorators:
   # Remove dangling $ref entries that point to missing component schemas
   oas-utils/remove-dangling-refs: {}
 
+  # Remove single-composition wrapper schemas
+  oas-utils/remove-single-composition: {}
+
   # Seal object schemas
   oas-utils/seal-schema:
     useUnevaluatedProperties: true
@@ -225,6 +246,7 @@ Notes:
 import {
   cleanupDiscriminatorMappings,
   removeDanglingRefs,
+  removeSingleComposition,
   removeUnusedSchemas,
   allOfToOneOf,
   sealSchema,
@@ -246,6 +268,10 @@ sealSchema(doc, { useUnevaluatedProperties: true, uplift: true });
 // Remove dangling refs (aggressive mode prunes external URIs too)
 const dangling = removeDanglingRefs(doc, { aggressive: true });
 console.log(`Removed ${dangling.removed} dangling $ref(s)`);
+
+// Remove single-composition wrapper schemas
+const single = removeSingleComposition(doc);
+console.log(`Removed ${single.schemasRemoved} single-composition schema(s)`);
 ```
 
 ## Notes

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators, runRemoveSingleComposition } from "./lib/cliActions.js";
 import YAML from "yaml";
 import {dropNulls} from "./lib/utils.js";
 import { createRequire } from "node:module";
@@ -201,6 +201,37 @@ program
     ) => {
       try {
         await runCleanupDiscriminators(opts, format, () => reader(input));
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+program
+  .command("remove-single-composition")
+  .showHelpAfterError()
+  .description("Remove single-composition wrapper schemas (allOf/anyOf/oneOf with a single $ref)")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .option(
+    "--aggressive",
+    "Also remove schemas with extra keywords (e.g. description, discriminator) alongside the composition keyword, unless properties is present",
+    false
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: { output?: string; aggressive?: boolean }
+    ) => {
+      try {
+        await runRemoveSingleComposition(opts, format, () => reader(input));
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;
