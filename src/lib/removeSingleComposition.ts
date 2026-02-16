@@ -16,6 +16,17 @@ export interface RemoveSingleCompositionOptions {
    * @default false
    */
   aggressive?: boolean;
+
+  /**
+   * A predicate function to determine which schemas to keep.
+   * If provided, a schema will be kept (not removed) if this function returns true.
+   * The function receives the schema name and the schema object.
+   *
+   * @param name - The name of the schema
+   * @param schema - The schema object
+   * @returns true to keep the schema, false to allow removal
+   */
+  keep?: (name: string, schema: any) => boolean;
 }
 
 /**
@@ -56,13 +67,25 @@ function getSingleCompositionTarget(schema: any, aggressive: boolean = false): s
 /**
  * Resolves transitive chains in the replacement map.
  * If Foo→Bar and Bar→Baz, resolves Foo→Baz.
+ * However, stops if the intermediate target is marked to keep.
+ * If Bar is kept, Foo→Bar is not resolved further to Bar→Baz.
  */
-function resolveTransitiveChains(replacements: Map<string, string>): void {
+function resolveTransitiveChains(
+  replacements: Map<string, string>,
+  keep?: (name: string, schema: any) => boolean,
+  schemas?: any
+): void {
   for (const [from, to] of replacements) {
     let resolved = to;
     const visited = new Set<string>([from]);
     while (replacements.has(resolved) && !visited.has(resolved)) {
       visited.add(resolved);
+      // Check if the intermediate target is marked to keep
+      const targetName = refToName(resolved);
+      if (keep && targetName && schemas && keep(targetName, schemas[targetName])) {
+        // Stop resolving if we hit a schema marked to keep
+        break;
+      }
       resolved = replacements.get(resolved)!;
     }
     if (resolved !== to) {
@@ -83,16 +106,23 @@ function resolveTransitiveChains(replacements: Map<string, string>): void {
 export function removeSingleComposition(doc: any, options?: RemoveSingleCompositionOptions): {
   schemasRemoved: number;
   removed: string[];
+  replacements: Record<string, string>;
 } {
-  if (!doc || typeof doc !== 'object') return { schemasRemoved: 0, removed: [] };
+  if (!doc || typeof doc !== 'object') return { schemasRemoved: 0, removed: [], replacements: {} };
 
   const aggressive = Boolean(options?.aggressive);
+  const keep = options?.keep;
   const schemas = doc.components?.schemas;
-  if (!schemas || typeof schemas !== 'object') return { schemasRemoved: 0, removed: [] };
+  if (!schemas || typeof schemas !== 'object') return { schemasRemoved: 0, removed: [], replacements: {} };
 
   // Step 1: Identify single-composition schemas and build replacement map
   const replacements = new Map<string, string>(); // full ref → full ref
   for (const [name, schema] of Object.entries(schemas)) {
+    // Check if schema should be kept using the predicate
+    if (keep && keep(name, schema)) {
+      continue;
+    }
+
     const targetRef = getSingleCompositionTarget(schema, aggressive);
     if (targetRef) {
       const fromRef = `#/components/schemas/${name}`;
@@ -100,10 +130,10 @@ export function removeSingleComposition(doc: any, options?: RemoveSingleComposit
     }
   }
 
-  if (replacements.size === 0) return { schemasRemoved: 0, removed: [] };
+  if (replacements.size === 0) return { schemasRemoved: 0, removed: [], replacements: {} };
 
-  // Step 2: Resolve transitive chains
-  resolveTransitiveChains(replacements);
+  // Step 2: Resolve transitive chains (respecting the keep predicate)
+  resolveTransitiveChains(replacements, keep, schemas);
 
   // Step 3: Replace all $ref occurrences throughout the document
   traverseAndTransform(doc, (node: any) => {
@@ -129,15 +159,18 @@ export function removeSingleComposition(doc: any, options?: RemoveSingleComposit
     }
   }
 
-  // Step 5: Delete the removed schemas
+  // Step 5: Delete the removed schemas and build replacement details
   const removed: string[] = [];
-  for (const fromRef of replacements.keys()) {
+  const replacementDetails: Record<string, string> = {};
+  for (const [fromRef, toRef] of replacements.entries()) {
     const name = refToName(fromRef);
+    const targetName = refToName(toRef);
     if (name && schemas[name]) {
       delete schemas[name];
       removed.push(name);
+      replacementDetails[name] = targetName || toRef;
     }
   }
 
-  return { schemasRemoved: removed.length, removed };
+  return { schemasRemoved: removed.length, removed, replacements: replacementDetails };
 }

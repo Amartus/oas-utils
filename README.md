@@ -132,15 +132,29 @@ Remove single-composition wrapper schemas. A single-composition schema is one wh
 oas-utils remove-single-composition <input.yaml> -o output.yaml
 # Read from stdin and write to stdout
 cat openapi.yaml | oas-utils remove-single-composition > cleaned.yaml
+# Keep specific schemas from removal
+oas-utils remove-single-composition input.yaml --keep LegacyWrapper --keep DeprecatedWrapper
 ```
 
 Options:
-- -o, --output: write result to this file (defaults to stdout).
+- `-o, --output`: write result to this file (defaults to stdout).
+- `--aggressive`: also remove schemas with extra keywords (e.g. `description`, `discriminator`) alongside the composition keyword, unless `properties` is present.
+- `--keep <names...>`: schema name(s) to keep regardless of whether they are single-composition wrappers (can be repeated).
 
-Example:
+Examples:
+
+**Basic removal:**
 - Schema `Foo` with `allOf: [{$ref: '#/components/schemas/Bar'}]`
 - `Foo` is removed and all references to `Foo` are replaced with `Bar`
-- Transitive chains are resolved: if `A`→`B`→`C` are all single-composition, both `A` and `B` are removed and references point to `C`
+
+**Transitive chain resolution:**
+- If `A`→`B`→`C` are all single-composition (none kept), both `A` and `B` are removed and references point to `C`
+- Output: `A → C`, `B → C`
+
+**Chain resolution with kept intermediate schema:**
+- If `A`→`B`→`C` are all single-composition but `B` is kept with `--keep B`, only `A` is removed
+- Output: `A → B` (chain stops at B)
+- `B` is preserved in the document with its reference to `C` unchanged
 
 ### seal-schema
 

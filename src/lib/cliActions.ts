@@ -295,23 +295,30 @@ export async function runRemoveDangling(
  * allOf/anyOf/oneOf with one $ref) and rewires all references to point directly
  * to the target schema.
  *
- * @param opts - Options including output path
+ * @param opts - Options including output path, aggressive flag, and keep list
  * @param format - Function to format output
  * @param reader - Function to read input
  */
 export async function runRemoveSingleComposition(
-  opts: { output?: string; aggressive?: boolean },
+  opts: { output?: string; aggressive?: boolean; keep?: string[] },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
+  const keep = toArray(opts.keep);
   const doc = parseYamlOrJson(await reader());
 
   if (!validateComponentSchemas(doc)) return;
 
-  const result = removeSingleComposition(doc, { aggressive: Boolean(opts.aggressive) });
+  const result = removeSingleComposition(doc, {
+    aggressive: Boolean(opts.aggressive),
+    keep: keep.length > 0 ? (name: string) => keep.includes(name) : undefined,
+  });
 
   if (result.schemasRemoved > 0) {
-    console.error(`[REMOVE-SINGLE-COMPOSITION] Removed ${result.schemasRemoved} single-composition schema(s): ${result.removed.join(", ")}`);
+    console.error(`[REMOVE-SINGLE-COMPOSITION] Removed ${result.schemasRemoved} single-composition schema(s):`);
+    for (const [removed, target] of Object.entries(result.replacements)) {
+      console.error(`  ${removed} → ${target}`);
+    }
   } else {
     console.error("[INFO] No single-composition schemas found.");
   }

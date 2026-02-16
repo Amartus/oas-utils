@@ -14,9 +14,11 @@ describe("cleanupDiscriminatorMappings", () => {
             discriminator: {
               propertyName: "type",
               mapping: {
+                "keyToAnimal": "#/components/schemas/Animal",
                 "Cat": "#/components/schemas/Cat",
                 "Dog": "#/components/schemas/Dog",
-                "NonExistent": "#/components/schemas/NonExistent"
+                "NonExistent": "#/components/schemas/NonExistent",
+                "NoneEx": "#/components/schemas/SomeStrangeSchema"
               }
             }
           },
@@ -39,17 +41,18 @@ describe("cleanupDiscriminatorMappings", () => {
     const result = cleanupDiscriminatorMappings(doc);
 
     expect(result.schemasChecked).toBe(1);
-    expect(result.mappingsRemoved).toBe(1);
+    expect(result.mappingsRemoved).toBe(2);
     expect(result.discriminatorsRemoved).toBe(0);
     expect(result.removedDiscriminators).toEqual([]);
     expect(result.details).toHaveLength(1);
     expect(result.details[0]).toEqual({
       schema: "Animal",
-      removed: ["NonExistent"]
+      removed: ["NonExistent", "NoneEx"]
     });
     expect(doc.components.schemas.Animal.discriminator.mapping).toEqual({
       "Cat": "#/components/schemas/Cat",
-      "Dog": "#/components/schemas/Dog"
+      "Dog": "#/components/schemas/Dog",
+      "keyToAnimal": "#/components/schemas/Animal"
     });
   });
 

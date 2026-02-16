@@ -230,10 +230,15 @@ program
     "Also remove schemas with extra keywords (e.g. description, discriminator) alongside the composition keyword, unless properties is present",
     false
   )
+  .option(
+    "--keep <names...>",
+    "Schema names to keep regardless of whether they are single-composition wrappers (can be repeated)",
+    []
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; aggressive?: boolean }
+      opts: { output?: string; aggressive?: boolean; keep?: string[] }
     ) => {
       try {
         await runRemoveSingleComposition(opts, format, () => reader(input));

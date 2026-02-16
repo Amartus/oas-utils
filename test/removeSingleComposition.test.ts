@@ -474,4 +474,467 @@ describe("removeSingleComposition", () => {
       doc.paths["/items"].get.responses["200"].content["application/json"].schema.items.$ref
     ).toBe("#/components/schemas/Real");
   });
+
+  it("should support a keep predicate to prevent removal of matching schemas", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Wrapper1: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Wrapper2: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+      paths: {
+        "/w1": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Wrapper1" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/w2": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Wrapper2" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      keep: (name) => name === "Wrapper1",
+    });
+
+    // Only Wrapper2 should be removed
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.removed).toContain("Wrapper2");
+    expect(result.removed).not.toContain("Wrapper1");
+
+    // Wrapper1 should be kept as-is
+    expect(doc.components.schemas.Wrapper1).toBeDefined();
+    expect(doc.components.schemas.Wrapper1.allOf).toBeDefined();
+
+    // Wrapper2 should be removed
+    expect(doc.components.schemas.Wrapper2).toBeUndefined();
+
+    // References should be updated: Wrapper2 refs → Target, Wrapper1 refs unchanged
+    expect(
+      doc.paths["/w1"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/Wrapper1");
+    expect(
+      doc.paths["/w2"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/Target");
+  });
+
+  it("should support keep predicate based on schema properties", () => {
+    const doc = {
+      components: {
+        schemas: {
+          DeprecatedWrapper: {
+            deprecated: true,
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          NormalWrapper: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      aggressive: true,
+      keep: (name, schema) => schema.deprecated === true,
+    });
+
+    // Only NormalWrapper should be removed
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.removed).toContain("NormalWrapper");
+    expect(result.removed).not.toContain("DeprecatedWrapper");
+
+    // DeprecatedWrapper should be kept
+    expect(doc.components.schemas.DeprecatedWrapper).toBeDefined();
+    expect(doc.components.schemas.NormalWrapper).toBeUndefined();
+  });
+
+  it("should keep all schemas when predicate always returns true", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Wrapper1: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Wrapper2: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      keep: () => true,
+    });
+
+    expect(result.schemasRemoved).toBe(0);
+    expect(doc.components.schemas.Wrapper1).toBeDefined();
+    expect(doc.components.schemas.Wrapper2).toBeDefined();
+  });
+
+  it("should remove all schemas when predicate always returns false", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Wrapper1: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Wrapper2: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      keep: () => false,
+    });
+
+    expect(result.schemasRemoved).toBe(2);
+    expect(doc.components.schemas.Wrapper1).toBeUndefined();
+    expect(doc.components.schemas.Wrapper2).toBeUndefined();
+  });
+
+  it("should respect keep predicate with aggressive mode", () => {
+    const doc = {
+      components: {
+        schemas: {
+          KeptWithDescription: {
+            description: "Keep this one",
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          RemovedWithDescription: {
+            description: "Remove this one",
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      aggressive: true,
+      keep: (name) => name === "KeptWithDescription",
+    });
+
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.removed).toContain("RemovedWithDescription");
+    expect(doc.components.schemas.KeptWithDescription).toBeDefined();
+    expect(doc.components.schemas.RemovedWithDescription).toBeUndefined();
+  });
+
+  it("should track replacements mapping for removed schemas", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Wrapper: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.replacements).toBeDefined();
+    expect(result.replacements.Wrapper).toBe("Target");
+  });
+
+  it("should track multiple replacements", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Wrapper1: {
+            allOf: [{ $ref: "#/components/schemas/Real1" }],
+          },
+          Wrapper2: {
+            allOf: [{ $ref: "#/components/schemas/Real2" }],
+          },
+          Real1: { type: "object" },
+          Real2: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.schemasRemoved).toBe(2);
+    expect(result.replacements.Wrapper1).toBe("Real1");
+    expect(result.replacements.Wrapper2).toBe("Real2");
+  });
+
+  it("should track replacements with transitive chains resolved", () => {
+    const doc = {
+      components: {
+        schemas: {
+          A: {
+            allOf: [{ $ref: "#/components/schemas/B" }],
+          },
+          B: {
+            oneOf: [{ $ref: "#/components/schemas/C" }],
+          },
+          C: {
+            type: "object",
+            properties: { value: { type: "number" } },
+          },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.schemasRemoved).toBe(2);
+    // Both should resolve to the final target C
+    expect(result.replacements.A).toBe("C");
+    expect(result.replacements.B).toBe("C");
+  });
+
+  it("should not include entries for non-removed schemas in replacements", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Kept: {
+            description: "Keep this",
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Removed: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.replacements.Removed).toBe("Target");
+    expect(result.replacements.Kept).toBeUndefined();
+  });
+
+  it("should return empty replacements when no schemas are removed", () => {
+    const doc = {
+      components: {
+        schemas: {
+          Normal: {
+            type: "object",
+            properties: { id: { type: "integer" } },
+          },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.schemasRemoved).toBe(0);
+    expect(result.replacements).toEqual({});
+  });
+
+  it("should respect keep predicate in replacements mapping", () => {
+    const doc = {
+      components: {
+        schemas: {
+          KeptWrapper: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          RemovedWrapper: {
+            allOf: [{ $ref: "#/components/schemas/Target" }],
+          },
+          Target: { type: "object" },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc, {
+      keep: (name) => name === "KeptWrapper",
+    });
+
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.replacements.RemovedWrapper).toBe("Target");
+    expect(result.replacements.KeptWrapper).toBeUndefined();
+  });
+
+  it("should not resolve chains through kept intermediate schemas", () => {
+    const doc = {
+      components: {
+        schemas: {
+          A: {
+            allOf: [{ $ref: "#/components/schemas/B" }],
+          },
+          B: {
+            allOf: [{ $ref: "#/components/schemas/C" }],
+          },
+          C: {
+            type: "object",
+            properties: { value: { type: "number" } },
+          },
+        },
+      },
+      paths: {
+        "/a": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/A" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/b": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/B" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    // Keep B: A should resolve to B (not C), but B will not be removed
+    const result = removeSingleComposition(doc, {
+      keep: (name) => name === "B",
+    });
+
+    expect(result.schemasRemoved).toBe(1);
+    expect(result.removed).toContain("A");
+    expect(result.removed).not.toContain("B");
+    expect(doc.components.schemas.B).toBeDefined();
+    expect(doc.components.schemas.A).toBeUndefined();
+
+    // A should be replaced with B (not C), because B is kept
+    expect(result.replacements.A).toBe("B");
+    expect(result.replacements.B).toBeUndefined();
+
+    // Verify references are updated correctly
+    expect(
+      doc.paths["/a"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/B");
+    // B still exists with its reference to C
+    expect(
+      doc.paths["/b"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/B");
+  });
+
+  it("should still resolve chains when intermediate schemas are not kept", () => {
+    const doc = {
+      components: {
+        schemas: {
+          A: {
+            allOf: [{ $ref: "#/components/schemas/B" }],
+          },
+          B: {
+            allOf: [{ $ref: "#/components/schemas/C" }],
+          },
+          C: {
+            type: "object",
+            properties: { value: { type: "number" } },
+          },
+        },
+      },
+      paths: {
+        "/a": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/A" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = removeSingleComposition(doc);
+
+    expect(result.schemasRemoved).toBe(2);
+    expect(doc.components.schemas.A).toBeUndefined();
+    expect(doc.components.schemas.B).toBeUndefined();
+
+    // Both A and B should resolve all the way to C
+    expect(result.replacements.A).toBe("C");
+    expect(result.replacements.B).toBe("C");
+
+    expect(
+      doc.paths["/a"].get.responses["200"].content["application/json"].schema.$ref
+    ).toBe("#/components/schemas/C");
+  });
+
+  it("should handle complex chains with kept intermediate schemas", () => {
+    const doc = {
+      components: {
+        schemas: {
+          A: {
+            allOf: [{ $ref: "#/components/schemas/B" }],
+          },
+          B: {
+            allOf: [{ $ref: "#/components/schemas/C" }],
+          },
+          C: {
+            allOf: [{ $ref: "#/components/schemas/D" }],
+          },
+          D: {
+            type: "object",
+            properties: { value: { type: "string" } },
+          },
+        },
+      },
+    };
+
+    // Keep C (middle of the chain): A→B should resolve to C, but C→D should not
+    const result = removeSingleComposition(doc, {
+      keep: (name) => name === "C",
+    });
+
+    expect(result.schemasRemoved).toBe(2);
+    expect(result.removed).toContain("A");
+    expect(result.removed).toContain("B");
+    expect(result.removed).not.toContain("C");
+    expect(doc.components.schemas.C).toBeDefined();
+
+    // A and B both resolve to C (the kept schema), not D
+    expect(result.replacements.A).toBe("C");
+    expect(result.replacements.B).toBe("C");
+  });
 });

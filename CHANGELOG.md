@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2] - 2026-02-16
+### Added
+- Enhanced `remove-single-composition` with `--keep` CLI option to specify schema names that should be preserved, even if they are single-composition wrappers.
+- Added `replacements` tracking to `removeSingleComposition` API, returning a map of removed schemas to their replacement targets for transparency and debugging.
+
+### Changed
+- Improved transitive chain resolution in `remove-single-composition` to respect the `keep` predicate: when an intermediate schema in a chain is marked to keep, the resolution stops at that schema instead of continuing through it. For example, if A→B→C but B is kept, A will resolve to B (not C).
+
 ## [0.7.0] - 2026-02-13
 ### Added
 - `remove-single-composition` operation: removes single-composition wrapper schemas (schemas whose only content is a single `allOf`, `anyOf`, or `oneOf` with one `$ref`) and rewires all references to point directly to the target schema. Supports transitive chain resolution and discriminator mapping updates. Available as CLI command, Redocly decorator (`oas-utils/remove-single-composition`), and programmatic API (`removeSingleComposition`).
