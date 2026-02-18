@@ -1,5 +1,11 @@
 # Changelog
 
+
+## [0.7.3] - 2026-02-18
+
+### Changed
+- Added support for pattern matching in `--keep`
+
 ## [0.7.2] - 2026-02-16
 ### Added
 - Enhanced `remove-single-composition` with `--keep` CLI option to specify schema names that should be preserved, even if they are single-composition wrappers.

@@ -132,14 +132,58 @@ Remove single-composition wrapper schemas. A single-composition schema is one wh
 oas-utils remove-single-composition <input.yaml> -o output.yaml
 # Read from stdin and write to stdout
 cat openapi.yaml | oas-utils remove-single-composition > cleaned.yaml
-# Keep specific schemas from removal
+# Keep specific schemas from removal with exact name
 oas-utils remove-single-composition input.yaml --keep LegacyWrapper --keep DeprecatedWrapper
+# Keep schemas using wildcard patterns
+oas-utils remove-single-composition input.yaml --keep "Legacy*" --keep "*Wrapper"
+# Exclude schemas using negative patterns
+oas-utils remove-single-composition input.yaml --keep "!*Test" --keep "!*Deprecated"
+# Combine positive and negative patterns (keep Legacy* but not *Test)
+oas-utils remove-single-composition input.yaml --keep "Legacy*" --keep "Deprecated*" --keep "!*Test"
 ```
 
 Options:
 - `-o, --output`: write result to this file (defaults to stdout).
 - `--aggressive`: also remove schemas with extra keywords (e.g. `description`, `discriminator`) alongside the composition keyword, unless `properties` is present.
-- `--keep <names...>`: schema name(s) to keep regardless of whether they are single-composition wrappers (can be repeated).
+- `--keep <names...>`: schema name patterns to keep regardless of whether they are single-composition wrappers (can be repeated).
+
+**Wildcard Pattern Support:**
+
+The `--keep` option supports glob-style wildcard patterns for flexible schema matching:
+
+- **Exact match**: `Foo` - matches only "Foo" (no wildcards)
+- **Prefix match**: `Foo*` - matches schemas starting with "Foo" (e.g., "Foo", "FooBar", "FooBarBaz")
+- **Suffix match**: `*Bar` - matches schemas ending with "Bar" (e.g., "Bar", "FooBar", "MyFooBar")
+- **Substring match**: `*Baz*` - matches schemas containing "Baz" anywhere (e.g., "Baz", "FooBaz", "BazBar", "FooBazBar")
+- **Match all**: `*` - matches everything
+- **Negative patterns**: `!Pattern` - exclude schemas matching "Pattern" (can combine wildcards: `!*Test`, `!Deprecated*`)
+
+**Pattern Matching Logic:**
+
+- **No patterns**: All eligible single-composition schemas are removed (default behavior)
+- **Positive patterns only** (e.g., `--keep "Foo*" --keep "Bar"`): Only schemas matching at least one pattern are kept
+- **Negative patterns only** (e.g., `--keep "!*Test"`): All schemas EXCEPT those matching negative patterns are kept
+- **Mixed patterns** (e.g., `--keep "Legacy*" --keep "!*Test"`): Schemas must match at least one positive pattern AND must NOT match any negative pattern
+
+**Pattern Examples:**
+
+```bash
+# Keep all schemas starting with "Legacy" or "Deprecated"
+oas-utils remove-single-composition spec.yaml --keep "Legacy*" --keep "Deprecated*"
+
+# Keep all schemas ending with "Wrapper" or "Ref"
+oas-utils remove-single-composition spec.yaml --keep "*Wrapper" --keep "*Ref"
+
+# Remove all test schemas (keep everything except those ending in "Test")
+oas-utils remove-single-composition spec.yaml --keep "!*Test"
+
+# Keep Legacy/Deprecated schemas but exclude test variants
+oas-utils remove-single-composition spec.yaml --keep "Legacy*" --keep "Deprecated*" --keep "!*Test"
+# Results: "LegacyUser" ✓ kept, "LegacyTest" ✗ removed, "DeprecatedProduct" ✓ kept, "Test" ✗ removed
+
+# Keep specific names and patterns
+oas-utils remove-single-composition spec.yaml --keep "User" --keep "Product*" --keep "*Response"
+```
 
 Examples:
 

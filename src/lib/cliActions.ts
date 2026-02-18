@@ -13,6 +13,7 @@ import { sealSchema, SealSchemaOptions } from "./sealSchema.js";
 import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js";
 import { removeDanglingRefs } from "./removeDanglingRefs.js";
 import { removeSingleComposition } from "./removeSingleComposition.js";
+import { createKeepPredicate } from "./patternMatching.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -70,6 +71,7 @@ function validateComponentSchemas(doc: any): boolean {
  * Helper to convert option values to arrays if needed
  */
 function toArray(value: any): string[] {
+  if(value === undefined || value === null) return [];
   if (Array.isArray(value)) return value;
   return value ? String(value).split(",").map(s => s.trim()).filter(Boolean) : [];
 }
@@ -295,6 +297,13 @@ export async function runRemoveDangling(
  * allOf/anyOf/oneOf with one $ref) and rewires all references to point directly
  * to the target schema.
  *
+ * Supports wildcard patterns in keep list:
+ * - `Foo` - exact match
+ * - `Foo*` - starts with "Foo"
+ * - `*Bar` - ends with "Bar"
+ * - `*Baz*` - contains "Baz"
+ * - `!Foo*` - negative pattern (exclude schemas starting with "Foo")
+ *
  * @param opts - Options including output path, aggressive flag, and keep list
  * @param format - Function to format output
  * @param reader - Function to read input
@@ -304,14 +313,16 @@ export async function runRemoveSingleComposition(
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
-  const keep = toArray(opts.keep);
+  const keepPatterns = toArray(opts.keep);
+  const keepPredicate = createKeepPredicate(keepPatterns);
+
   const doc = parseYamlOrJson(await reader());
 
   if (!validateComponentSchemas(doc)) return;
 
   const result = removeSingleComposition(doc, {
     aggressive: Boolean(opts.aggressive),
-    keep: keep.length > 0 ? (name: string) => keep.includes(name) : undefined,
+    keep: keepPredicate,
   });
 
   if (result.schemasRemoved > 0) {
