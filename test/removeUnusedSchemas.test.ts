@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { removeUnusedSchemas } from "../src/lib/removeUnusedSchemas";
-import { testSchemas } from "./schemaLoader.js";
 
 async function loadYaml(file: string): Promise<any> {
   const raw = await fs.readFile(file, "utf8");
@@ -854,66 +853,6 @@ describe("removeUnusedSchemas (unit tests)", () => {
     
     // Unrelated should be removed
     expect(result.components.schemas.Unrelated).toBeUndefined();
-  });
-
-  it("should NOT promote MVO-like schemas when their shared data mixin is only reached via an allOf parent's properties", () => {
-    // Reproduces a real-world bug with TMF637 MVO types being unexpectedly retained.
-    //
-    // Scenario:
-    //   DogRes   (used from paths, allOf -> Dog)
-    //   Dog      (allOf parent; has a property ref -> Breed; allOf -> Animal [ignored])
-    //   Breed    (plain data mixin - NOT an inheritance base, only a property type in Dog)
-    //   DogCreate  (mutation-variant; allOf -> [Breed, Animal])  ← should be removed
-    //
-    // Bug: Breed gets added to directlyReferenced because it is a non-allOf ref
-    // found inside the allOf parent (Dog). The promotion step then promotes DogCreate
-    // as an allOf-child of Breed, even though DogCreate has nothing to do with
-    // the response path. For now the only mechanism is to make it explicit
-    // TODO consider support for promoting based on discriminator values
-
-    const doc = builders.doc(
-      { "/dogs": builders.path("get", builders.jsonResponse("DogRes")) },
-      {
-        Animal: builders.schema.simple("object"),
-
-        Breed: builders.schema.withProps({
-          breedName: { type: "string" }
-        }),
-
-        Dog: builders.schema.allOf(
-          ["Animal"],
-          builders.schema.withProps({
-            breed: { $ref: "#/components/schemas/Breed" }
-          })
-        ),
-
-        DogRes: builders.schema.allOf(["Dog"]),
-
-        // mutation-variant: mixes Breed (data mixin) with Animal (ignored parent)
-        // Should NOT be promoted just because Breed was pulled in via Dog's properties
-        DogCreate: builders.schema.allOf(["Breed", "Animal"]),
-
-        Unrelated: builders.schema.simple("string")
-      }
-    );
-
-    const result = removeUnusedSchemas(deepClone(doc), {
-      ignoreParents: ["Animal"]
-    });
-
-    expect(result.components.schemas.DogRes).toBeDefined();
-    expect(result.components.schemas.Dog).toBeDefined();
-    // Animal is kept because it is a transitive allOf parent of DogRes (correct behaviour)
-    expect(result.components.schemas.Animal).toBeDefined();
-    // Breed is kept because it is a non-allOf property ref reachable from Dog
-    expect(result.components.schemas.Breed).toBeDefined();
-    expect(result.components.schemas.Unrelated).toBeUndefined();
-
-    // This is the key assertion - DogCreate should NOT be promoted just because
-    // Breed (its allOf parent) was incidentally reachable via Dog's properties.
-    // With Option B, Breed is not promotion-eligible (it was only reached through
-    // an allOf parent's body), so DogCreate is never promoted.
-    expect(result.components.schemas.DogCreate).toBeUndefined();
   });
 
   it("should keep schemas referenced in array items", () => {

@@ -48,6 +48,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "eslint --ext .ts src test --max-warnings=0",
+    "lint:fix": "eslint --ext .ts src test --fix",
     "prepare": "npm run build"
   },
   "dependencies": {
@@ -58,7 +60,13 @@
     "yaml": "^2.5.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.5.4",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.3.0",
     "tsx": "^4.19.1",
     "typescript": "^5.5.4",
     "vitest": "^2.1.9"

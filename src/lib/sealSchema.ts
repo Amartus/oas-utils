@@ -36,7 +36,7 @@ const isAllOf = (prop: string): boolean => {
  */
 export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
   const useUnevaluated = opts.useUnevaluatedProperties !== false;
-  let sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
+  const sealing = useUnevaluated ? "unevaluatedProperties" : "additionalProperties";
 
   const supportsUnevaluated = documentSupportsUnevaluatedProperties(doc);
   const containsAllOfRefs = documentContainsAllOfRefs(doc);
