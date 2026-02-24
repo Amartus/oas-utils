@@ -14,6 +14,7 @@ import { cleanupDiscriminatorMappings } from "./cleanupDiscriminatorMappings.js"
 import { removeDanglingRefs } from "./removeDanglingRefs.js";
 import { removeSingleComposition } from "./removeSingleComposition.js";
 import { createKeepPredicate } from "./patternMatching.js";
+import { inlineSchema, batchInlineSchemas, InlineSchemaOptions } from "./inlineSchema.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -332,6 +333,62 @@ export async function runRemoveSingleComposition(
     }
   } else {
     console.error("[INFO] No single-composition schemas found.");
+  }
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Inline a schema by replacing $ref to it with its body content.
+ * 
+ * Supports:
+ * - Regular mode: inline schema body, keeping transitive refs
+ * - Chain mode: inline transitively (inline nested refs first)
+ * - Batch mode: inline multiple schemas at once
+ * - Discriminator warnings: warn if inlined schema is in discriminator mapping
+ * 
+ * @param opts - Options including schema name(s), combiner type, chain mode, output path
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runInlineSchema(
+  opts: {
+    schemas: string[];
+    combiner?: 'allOf' | 'oneOf' | 'anyOf';
+    chain?: boolean;
+    warnDiscriminator?: boolean;
+    output?: string;
+  },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const doc = parseYamlOrJson(await reader());
+
+  if (!validateComponentSchemas(doc)) return;
+
+  const options: InlineSchemaOptions = {
+    combiner: opts.combiner || 'allOf',
+    chain: opts.chain || false,
+    warnDiscriminator: opts.warnDiscriminator !== false,
+    onDiscriminatorWarning: (warning) => {
+      console.error(
+        `[WARN] Schema '${warning.schemaName}' is in discriminator mapping of '${warning.parentName}' (property: ${warning.discriminatorProperty})`
+      );
+    },
+  };
+
+  const result = batchInlineSchemas(doc, opts.schemas, options);
+
+  if (result.inlined > 0) {
+    console.error(`[INLINE-SCHEMA] Performed ${result.inlined} inlining operation(s).`);
+    console.error(`[INLINE-SCHEMA] Inlined schema(s): ${result.inlinedSchemas.join(", ")}`);
+    console.error(`[INLINE-SCHEMA] Affected schema(s): ${result.affectedSchemas.join(", ")}`);
+  } else {
+    console.error(`[INFO] No references found for schema(s): ${opts.schemas.join(", ")}`);
+  }
+
+  if (result.discriminatorWarnings.length > 0) {
+    console.error(`[INLINE-SCHEMA] ${result.discriminatorWarnings.length} discriminator warning(s) encountered.`);
   }
 
   await writeOutput(doc, opts.output, format);

@@ -1,0 +1,53 @@
+openapi: 3.1.0
+info:
+  title: Inline Schema Discriminator Example
+  version: 1.0.0
+paths:
+  /animals:
+    get:
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Animal"
+components:
+  schemas:
+    Animal:
+      type: object
+      discriminator:
+        propertyName: animalType
+        mapping:
+          dog: "#/components/schemas/Dog"
+          cat: "#/components/schemas/Cat"
+      oneOf:
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Cat"
+
+    Dog:
+      type: object
+      properties:
+        animalType:
+          const: dog
+        breed:
+          type: string
+        bark:
+          type: string
+
+    Cat:
+      type: object
+      properties:
+        animalType:
+          const: cat
+        meow:
+          type: string
+
+    # Another schema that uses Dog
+    DogOwner:
+      allOf:
+        - $ref: "#/components/schemas/Dog"
+        - type: object
+          properties:
+            ownerName:
+              type: string

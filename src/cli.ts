@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators, runRemoveSingleComposition } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators, runRemoveSingleComposition, runInlineSchema } from "./lib/cliActions.js";
 import YAML from "yaml";
 import {dropNulls} from "./lib/utils.js";
 import { createRequire } from "node:module";
@@ -242,6 +242,66 @@ program
     ) => {
       try {
         await runRemoveSingleComposition(opts, format, () => reader(input));
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+program
+  .command("inline-schema")
+  .showHelpAfterError()
+  .description("Inline a schema by replacing $ref to it with its body content")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .requiredOption(
+    "--schemas <names...>",
+    "Schema name(s) to inline (can specify multiple)"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .option(
+    "--combiner <type>",
+    "Composition keyword to target: allOf, oneOf, or anyOf (default: allOf)",
+    "allOf"
+  )
+  .option(
+    "--chain",
+    "Enable chain mode: inline transitively (inline nested refs first)",
+    false
+  )
+  .option(
+    "--no-warn-discriminator",
+    "Disable warnings when inlined schema is in discriminator mapping"
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: {
+        schemas: string[];
+        output?: string;
+        combiner?: 'allOf' | 'oneOf' | 'anyOf';
+        chain?: boolean;
+        warnDiscriminator?: boolean;
+      }
+    ) => {
+      try {
+        await runInlineSchema(
+          {
+            schemas: opts.schemas,
+            combiner: opts.combiner || 'allOf',
+            chain: opts.chain || false,
+            warnDiscriminator: opts.warnDiscriminator !== false,
+            output: opts.output,
+          },
+          format,
+          () => reader(input)
+        );
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;

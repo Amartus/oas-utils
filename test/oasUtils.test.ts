@@ -89,6 +89,48 @@ describe("oasUtils", () => {
       const graph = buildInheritanceGraph(schemas);
       expect(graph.size).toBe(0);
     });
+
+    it("builds graph with oneOf combiner", () => {
+      const schemas = {
+        Animal: {
+          type: "object",
+          discriminator: { propertyName: "type" },
+          oneOf: [
+            { $ref: "#/components/schemas/Cat" },
+            { $ref: "#/components/schemas/Dog" },
+          ],
+        },
+        Cat: { type: "object", properties: { meow: { type: "boolean" } } },
+        Dog: { type: "object", properties: { bark: { type: "boolean" } } },
+      };
+
+      const graph = buildInheritanceGraph(schemas, 'oneOf');
+
+      expect(graph.get("Cat")).toBeDefined();
+      expect(graph.get("Cat")!.has("Animal")).toBe(true);
+      expect(graph.get("Dog")).toBeDefined();
+      expect(graph.get("Dog")!.has("Animal")).toBe(true);
+    });
+
+    it("builds graph with anyOf combiner", () => {
+      const schemas = {
+        Trait1: { type: "object", properties: { a: { type: "string" } } },
+        Trait2: { type: "object", properties: { b: { type: "string" } } },
+        Combined: {
+          anyOf: [
+            { $ref: "#/components/schemas/Trait1" },
+            { $ref: "#/components/schemas/Trait2" },
+          ],
+        },
+      };
+
+      const graph = buildInheritanceGraph(schemas, 'anyOf');
+
+      expect(graph.get("Trait1")).toBeDefined();
+      expect(graph.get("Trait1")!.has("Combined")).toBe(true);
+      expect(graph.get("Trait2")).toBeDefined();
+      expect(graph.get("Trait2")!.has("Combined")).toBe(true);
+    });
   });
 
   describe("getDescendants", () => {
@@ -217,6 +259,47 @@ describe("oasUtils", () => {
 
       const ancestors = getAncestors("Root", schemas);
       expect(ancestors.size).toBe(0);
+    });
+
+    it("gets ancestors with oneOf combiner", () => {
+      const schemas = {
+        Base: { type: "object", properties: { id: { type: "string" } } },
+        Middle: {
+          oneOf: [
+            { $ref: "#/components/schemas/Base" },
+          ],
+        },
+        Derived: {
+          oneOf: [
+            { $ref: "#/components/schemas/Middle" },
+          ],
+        },
+      };
+
+      const ancestors = getAncestors("Derived", schemas, 'oneOf');
+
+      expect(ancestors.size).toBe(2);
+      expect(ancestors.has("Middle")).toBe(true);
+      expect(ancestors.has("Base")).toBe(true);
+    });
+
+    it("gets ancestors with anyOf combiner", () => {
+      const schemas = {
+        Trait1: { type: "object", properties: { a: { type: "string" } } },
+        Trait2: { type: "object", properties: { b: { type: "string" } } },
+        Combined: {
+          anyOf: [
+            { $ref: "#/components/schemas/Trait1" },
+            { $ref: "#/components/schemas/Trait2" },
+          ],
+        },
+      };
+
+      const ancestors = getAncestors("Combined", schemas, 'anyOf');
+
+      expect(ancestors.size).toBe(2);
+      expect(ancestors.has("Trait1")).toBe(true);
+      expect(ancestors.has("Trait2")).toBe(true);
     });
   });
 });

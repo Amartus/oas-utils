@@ -9,3 +9,4 @@ export * from './lib/schemaTransformUtils.js';
 export * from './lib/removeDanglingRefs.js';
 export * from './lib/removeSingleComposition.js';
 export * from './lib/patternMatching.js';
+export * from './lib/inlineSchema.js';

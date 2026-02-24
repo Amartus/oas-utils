@@ -15,12 +15,16 @@ export function refToName(ref: string): string | undefined {
  * 
  * Returns a Map where:
  * - Key: schema name (parent type)
- * - Value: Set of schema names that extend/compose this parent via allOf
+ * - Value: Set of schema names that extend/compose this parent via the specified combiner
  * 
  * @param schemas - The components.schemas object from an OpenAPI document
+ * @param combiner - The composition keyword to analyze (default: 'allOf')
  * @returns Map<string, Set<string>> - Parent schema to child schemas mapping
  */
-export function buildInheritanceGraph(schemas: Record<string, any>): Map<string, Set<string>> {
+export function buildInheritanceGraph(
+  schemas: Record<string, any>,
+  combiner: 'allOf' | 'oneOf' | 'anyOf' = 'allOf'
+): Map<string, Set<string>> {
   const graph = new Map<string, Set<string>>();
 
   if (!schemas || typeof schemas !== "object") {
@@ -30,7 +34,7 @@ export function buildInheritanceGraph(schemas: Record<string, any>): Map<string,
   for (const [childName, schema] of Object.entries(schemas)) {
     if (!schema || typeof schema !== "object") continue;
 
-    const path = `$.components.schemas.${childName}.allOf[*].$ref`;
+    const path = `$.components.schemas.${childName}.${combiner}[*].$ref`;
     let refs: any[] | undefined;
     try {
       refs = JSONPath({ path, json: { components: { schemas } }, resultType: 'value' }) as any[];
@@ -39,8 +43,8 @@ export function buildInheritanceGraph(schemas: Record<string, any>): Map<string,
     }
 
     if (!Array.isArray(refs)) {
-      refs = Array.isArray((schema as any).allOf)
-        ? (schema as any).allOf.map((item: any) => (item && typeof item === 'object' && typeof item.$ref === 'string' ? item.$ref : undefined)).filter(Boolean)
+      refs = Array.isArray((schema as any)[combiner])
+        ? (schema as any)[combiner].map((item: any) => (item && typeof item === 'object' && typeof item.$ref === 'string' ? item.$ref : undefined)).filter(Boolean)
         : [];
     }
 
@@ -87,11 +91,20 @@ export function getDescendants(parentName: string, graph: Map<string, Set<string
 /**
  * Gets all ancestors (direct and transitive) of a schema in the inheritance hierarchy.
  * 
+ * Ancestors are returned in BFS order: direct parents appear before grandparents, etc.
+ * Since JS Sets preserve insertion order, callers can rely on this ordering.
+ * To process bottom-up (deepest first), reverse the result: [...getAncestors(...)].reverse()
+ * 
  * @param childName - The schema name to find ancestors for
  * @param schemas - The components.schemas object from an OpenAPI document
- * @returns Set<string> - All ancestor schema names
+ * @param combiner - The composition keyword to analyze (default: 'allOf')
+ * @returns Set<string> - Ancestor schema names in BFS order (direct parents first)
  */
-export function getAncestors(childName: string, schemas: Record<string, any>): Set<string> {
+export function getAncestors(
+  childName: string,
+  schemas: Record<string, any>,
+  combiner: 'allOf' | 'oneOf' | 'anyOf' = 'allOf'
+): Set<string> {
   const ancestors = new Set<string>();
   const queue = [childName];
   const visited = new Set<string>();
@@ -102,9 +115,9 @@ export function getAncestors(childName: string, schemas: Record<string, any>): S
     visited.add(current);
 
     const schema = schemas[current];
-    if (!schema || typeof schema !== "object" || !Array.isArray(schema.allOf)) continue;
+    if (!schema || typeof schema !== "object" || !Array.isArray((schema as any)[combiner])) continue;
 
-    for (const item of schema.allOf) {
+    for (const item of (schema as any)[combiner]) {
       if (item && typeof item === "object" && typeof (item as any).$ref === "string") {
         const parentName = refToName((item as any).$ref);
         if (parentName && !ancestors.has(parentName)) {
