@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0]
+
+### Added
+- `inline-schema` CLI command with chain mode and combiner selection (allOf/oneOf/anyOf).
+- Inline schema APIs (`inlineSchema`, `batchInlineSchemas`) and Redocly decorator (`inline-schema`).
+- Inline schema examples and test coverage for inlining behavior and oasUtils helpers.
+- ESLint configuration and npm scripts to enable linting.
+
+### Changed
+- `allOfToOneOf` now treats nested refs inside `allOf` items (e.g. `allOf[1].properties.*.$ref`) as outside composition usage.
+
+### Fixed
+- `allOfToOneOf` wrapper creation now triggers when the base schema is referenced via nested `$ref` inside `allOf` item properties.
 
 ## [0.7.3] - 2026-02-18
 

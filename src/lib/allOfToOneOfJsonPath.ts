@@ -153,18 +153,25 @@ function isReferencedOutsideComposition(
       .split('.')
       .filter(Boolean);
 
-    let inAllOf = false;
-    let inDiscriminatorMapping = false;
+    const refIndex = pathParts.lastIndexOf('$ref');
 
-    for (let i = pathParts.length - 1; i >= 0; i--) {
-      const part = pathParts[i];
-      if (!inAllOf && part === 'allOf') inAllOf = true;
-      if (!inDiscriminatorMapping && (part === 'discriminator' || part === 'mapping')) inDiscriminatorMapping = true;
-      if (inAllOf && inDiscriminatorMapping) break;
-    }
+    // Direct inheritance ref shape: ...allOf.<index>.$ref
+    // We intentionally treat only allOf array entries as composition metadata.
+    const isDirectCompositionRef =
+      refIndex >= 2 &&
+      pathParts[refIndex - 2] === 'allOf' &&
+      /^\d+$/.test(pathParts[refIndex - 1] ?? '');
 
-    // Skip if in allOf (pure inheritance) or in discriminator mapping (metadata)
-    if (inAllOf || inDiscriminatorMapping) continue;
+    // Discriminator mapping ref shape: ...discriminator.mapping.<key>
+    const discriminatorIndex = pathParts.lastIndexOf('discriminator');
+    const mappingIndex = pathParts.lastIndexOf('mapping');
+    const isDiscriminatorMappingRef = discriminatorIndex !== -1 &&
+      mappingIndex === discriminatorIndex + 1 &&
+      refIndex >= mappingIndex + 1;
+
+    // Skip if direct composition ref (inheritance/composition entry) or discriminator mapping metadata
+    // Keep nested refs inside composed schemas, e.g. allOf[1].properties.value.$ref
+    if (isDirectCompositionRef || isDiscriminatorMappingRef) continue;
 
     return true;
   }
@@ -440,15 +447,47 @@ function replaceReferencesWithWrappers(
     }
   };
 
-  // Process schemas separately to preserve allOf/anyOf/oneOf inheritance
+  const isDirectCompositionRef = (pathParts: string[], refIndex: number): boolean => {
+    // Direct composition ref: allOf[n].$ref or anyOf[n].$ref or oneOf[n].$ref
+    return refIndex >= 2 &&
+      (pathParts[refIndex - 2] === 'allOf' || pathParts[refIndex - 2] === 'anyOf' || pathParts[refIndex - 2] === 'oneOf') &&
+      /^\d+$/.test(pathParts[refIndex - 1] ?? '');
+  };
+
+  // Process schemas separately to preserve direct composition refs
   const schemas = doc.components?.schemas;
   if (isValidObject(schemas)) {
     for (const schema of Object.values(schemas)) {
       if (!isValidObject(schema)) continue;
 
-      // Preserve composition arrays - replace refs only in non-composition parts
-      const { allOf, anyOf, oneOf, ...schemaWithoutComposition } = schema;
-      replaceRefs(schemaWithoutComposition);
+      // We process the entire schema but filter out direct composition refs during replacement
+      const results = JSONPath({
+        path: '$..$ref',
+        json: schema,
+        resultType: 'all',
+      }) as JSONPathResult[];
+
+      for (const result of results) {
+        const pathParts = result.path
+          .replace(/\['/g, '.')
+          .replace(/'\]/g, '')
+          .replace(/\[/g, '.')
+          .replace(/\]/g, '')
+          .split('.')
+          .filter(Boolean);
+
+        const refIndex = pathParts.lastIndexOf('$ref');
+
+        // Skip direct composition refs (allOf/anyOf/oneOf array items)
+        if (isDirectCompositionRef(pathParts, refIndex)) {
+          continue;
+        }
+
+        const replacement = typeof result.value === 'string' ? replacementMap.get(result.value) : undefined;
+        if (replacement && result.parent && result.parentProperty !== undefined) {
+          (result.parent as Record<string, unknown>)[result.parentProperty as keyof typeof result.parent] = replacement;
+        }
+      }
     }
   }
 

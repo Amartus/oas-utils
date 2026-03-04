@@ -627,6 +627,52 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
       .toBe("#/components/schemas/AnimalPolymorphic");
   });
 
+  it("creates wrapper when reference is nested inside allOf item properties", () => {
+    const doc: any = {
+      components: {
+        schemas: {
+          Entity: { type: "object" },
+          Animal: {
+            allOf: [
+              { $ref: "#/components/schemas/Entity" },
+              { type: "object", properties: { name: { type: "string" } } },
+            ],
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                Animal: "#/components/schemas/Animal",
+                Dog: "#/components/schemas/Dog",
+              },
+            },
+          },
+          Dog: {
+            allOf: [
+              { $ref: "#/components/schemas/Animal" },
+              { type: "object", properties: { value: { type: "string" } } },
+            ],
+          },
+          Kennel: {
+            allOf: [
+              { $ref: "#/components/schemas/Entity" },
+              {
+                type: "object",
+                properties: {
+                  pet: { $ref: "#/components/schemas/Animal" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = transform(deepClone(doc));
+
+    expect(result.components.schemas.AnimalPolymorphic).toBeDefined();
+    expect(result.components.schemas.AnimalOneOf).toBeDefined();
+    expect(result.components.schemas.Animal.discriminator).toBeUndefined();
+  });
+
   it("handles addDiscriminatorConst option", () => {
     const doc: any = {
       components: {
@@ -644,5 +690,79 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     const catAllOf = result.components.schemas.Cat.allOf;
     const catInline = catAllOf?.find((item: any) => item.properties && item.properties.type);
     expect(catInline).toBeUndefined();
+  });
+
+  it("replaces references in properties nested inside allOf composition items", () => {
+    // Regression test for: https://github.com/Amartus/oas-utils/issues/...
+    // When a schema uses allOf to compose with another, and that composition item
+    // contains properties that reference a polymorphic schema, those references
+    // should be replaced with the polymorphic wrapper.
+    //
+    // Example: Product.allOf[1].properties.productPrice.$ref → ProductPrice
+    // should become: Product.allOf[1].properties.productPrice.$ref → ProductPricePolymorphic
+    const doc: any = {
+      components: {
+        schemas: {
+          Base: {
+            type: "object",
+            properties: { id: { type: "string" } },
+          },
+          Price: {
+            allOf: [
+              { $ref: "#/components/schemas/Base" },
+              {
+                type: "object",
+                properties: {
+                  amount: { type: "number" },
+                },
+              },
+            ],
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                Price: "#/components/schemas/Price",
+                PremiumPrice: "#/components/schemas/PremiumPrice",
+              },
+            },
+          },
+          PremiumPrice: {
+            allOf: [
+              { $ref: "#/components/schemas/Price" },
+              {
+                type: "object",
+                properties: {
+                  premiumFee: { type: "number" },
+                },
+              },
+            ],
+          },
+          Product: {
+            allOf: [
+              { $ref: "#/components/schemas/Base" },
+              {
+                type: "object",
+                properties: {
+                  pricing: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Price" },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = transform(deepClone(doc));
+
+    // Verify wrappers were created
+    expect(result.components.schemas.PricePolymorphic).toBeDefined();
+    expect(result.components.schemas.PriceOneOf).toBeDefined();
+    expect(result.components.schemas.Price.discriminator).toBeUndefined();
+
+    // Verify the nested reference was replaced
+    const productPricingItems = result.components.schemas.Product.allOf[1].properties.pricing.items;
+    expect(productPricingItems.$ref).toBe("#/components/schemas/PricePolymorphic");
   });
 });
