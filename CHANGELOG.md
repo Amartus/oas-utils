@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.0]
+### Added
+Added distribution as CJS
+
 ## [0.8.0]
 
 ### Added
