@@ -478,4 +478,139 @@ describe("cleanupDiscriminatorMappings", () => {
       expect(doc.components.schemas.Animal_RES.discriminator).toBeDefined();
     });
   });
+
+  describe("removeDiscriminatorMatchers option", () => {
+    it("should remove discriminators using custom matchers", () => {
+      const doc = {
+        components: {
+          schemas: {
+            AnimalResponse: {
+              type: "object",
+              discriminator: {
+                propertyName: "type",
+                mapping: {
+                  "Cat": "#/components/schemas/Cat"
+                }
+              }
+            },
+            Vehicle: {
+              type: "object",
+              discriminator: {
+                propertyName: "kind",
+                mapping: {
+                  "Car": "#/components/schemas/Car"
+                }
+              }
+            },
+            Cat: { type: "object" },
+            Car: { type: "object" }
+          }
+        }
+      };
+
+      const result = cleanupDiscriminatorMappings(doc, {
+        removeDiscriminatorMatchers: [
+          (schemaName: string) => schemaName.endsWith("Response")
+        ]
+      });
+
+      expect(result.discriminatorsRemoved).toBe(1);
+      expect(result.removedDiscriminators).toEqual(["AnimalResponse"]);
+      expect(result.schemasChecked).toBe(1);
+      expect(result.mappingsRemoved).toBe(0);
+
+      expect(doc.components.schemas.AnimalResponse.discriminator).toBeUndefined();
+      expect(doc.components.schemas.Vehicle.discriminator).toBeDefined();
+    });
+
+    function crteateGhostDoc() {
+      const ghostDoc = {
+        components: {
+          schemas: {
+            Animal_RES: {
+              type: "object",
+              discriminator: {
+                propertyName: "type",
+                mapping: {
+                  "Cat": "#/components/schemas/Cat"
+                }
+              }
+            },
+            VehicleResponse: {
+              type: "object",
+              discriminator: {
+                propertyName: "kind",
+                mapping: {
+                  "Car": "#/components/schemas/Car"
+                }
+              }
+            },
+            InternalModel: {
+              type: "object",
+              discriminator: {
+                propertyName: "kind",
+                mapping: {
+                  "Ghost": "#/components/schemas/Ghost"
+                }
+              }
+            },
+            Cat: { type: "object" },
+            Car: { type: "object" }
+          }
+        }
+      };
+      return ghostDoc;
+    }
+
+    it("should evaluate patterns and custom matchers together", () => {
+      const ghostDoc = crteateGhostDoc();
+
+      const result = cleanupDiscriminatorMappings(ghostDoc, {
+        removeDiscriminatorPatterns: ["*_RES"],
+        removeDiscriminatorMatchers: [
+          (schemaName: string) => schemaName.endsWith("Response")
+        ]
+      });
+
+      expect(result.discriminatorsRemoved).toBe(2);
+      expect(result.removedDiscriminators).toEqual(["Animal_RES", "VehicleResponse"]);
+      expect(result.schemasChecked).toBe(1);
+      expect(result.mappingsRemoved).toBe(1);
+      expect(result.details).toEqual([
+        {
+          schema: "InternalModel",
+          removed: ["Ghost"]
+        }
+      ]);
+
+      expect(ghostDoc.components.schemas.Animal_RES.discriminator).toBeUndefined();
+      expect(ghostDoc.components.schemas.VehicleResponse.discriminator).toBeUndefined();
+      expect(ghostDoc.components.schemas.InternalModel.discriminator).toBeDefined();
+      expect(ghostDoc.components.schemas.InternalModel.discriminator.mapping).toEqual({});
+    });
+
+    it("should remove discriminator for ghost", () => {
+      const ghostDoc = crteateGhostDoc();
+
+      const result = cleanupDiscriminatorMappings(ghostDoc, {
+        removeDiscriminatorMatchers: [
+          (_: string, schema: any) => Object.keys(schema?.discriminator?.mapping || {}).length == 0
+        ]
+      });
+
+      expect(result.discriminatorsRemoved).toBe(1);
+      expect(result.removedDiscriminators).toEqual(["InternalModel"]);
+      expect(result.schemasChecked).toBe(3);
+      expect(result.mappingsRemoved).toBe(1);
+      expect(result.details).toEqual([
+        {
+          schema: "InternalModel",
+          removed: ["Ghost"]
+        }
+      ]);
+
+      expect(ghostDoc.components.schemas.InternalModel.discriminator).toBeUndefined();
+    });
+
+  });
 });

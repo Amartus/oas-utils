@@ -8,6 +8,7 @@ export interface CleanupDiscriminatorOptions {
    * Example: ["*_RES", "*Response"] will remove discriminators from schemas ending with _RES or Response
    */
   removeDiscriminatorPatterns?: string[];
+  removeDiscriminatorMatchers?: ((schemaName: string, schema: any) => boolean)[];
 }
 
 /**
@@ -51,6 +52,23 @@ export function cleanupDiscriminatorMappings(doc: any, options?: CleanupDiscrimi
     });
   };
 
+  const patternsToMatcher = (schemaName: string, schema: any): boolean => {
+    if (!options?.removeDiscriminatorPatterns || options.removeDiscriminatorPatterns.length === 0) {
+      return false;
+    }
+    return matchesPattern(schemaName, options.removeDiscriminatorPatterns);
+  };
+
+  const allMatchers = [
+    patternsToMatcher,
+    ...(options?.removeDiscriminatorMatchers || []),
+  ];
+
+  // Check if any matcher indicates that the discriminator should be removed for this schema
+  const shouldRemoveDiscriminator = (schemaName: string, schema: any): boolean => {
+    return allMatchers.some(matcher => matcher(schemaName, schema));
+  };
+
   // Collect all existing schema names for validation
   const existingSchemas = new Set<string>(Object.keys(schemas));
 
@@ -67,9 +85,7 @@ export function cleanupDiscriminatorMappings(doc: any, options?: CleanupDiscrimi
     // Check if schema has discriminator
     if (schema.discriminator && typeof schema.discriminator === "object") {
       // Check if discriminator should be removed based on patterns
-      if (options?.removeDiscriminatorPatterns && 
-          options.removeDiscriminatorPatterns.length > 0 &&
-          matchesPattern(schemaName, options.removeDiscriminatorPatterns)) {
+      if (shouldRemoveDiscriminator(schemaName, schema)) {
         delete schema.discriminator;
         discriminatorsRemoved++;
         removedDiscriminators.push(schemaName);
@@ -101,6 +117,12 @@ export function cleanupDiscriminatorMappings(doc: any, options?: CleanupDiscrimi
             removed: removedMappings,
           });
         }
+      }
+            // Check if discriminator should be removed based on patterns
+      if (shouldRemoveDiscriminator(schemaName, schema)) {
+        delete schema.discriminator;
+        discriminatorsRemoved++;
+        removedDiscriminators.push(schemaName);
       }
     }
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.1] - 2026-03-13
+### Added
+- Added `removeDiscriminatorMatchers` support in `cleanupDiscriminatorMappings` options to allow custom predicate-driven discriminator removal.
+- Added test coverage for matcher-based discriminator removal and combined pattern + matcher behavior.
+
 ## [0.9.0]
 ### Added
 Added distribution as CJS
