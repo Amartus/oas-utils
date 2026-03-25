@@ -15,6 +15,7 @@ import { removeDanglingRefs } from "./removeDanglingRefs.js";
 import { removeSingleComposition } from "./removeSingleComposition.js";
 import { createKeepPredicate } from "./patternMatching.js";
 import { inlineSchema, batchInlineSchemas, InlineSchemaOptions } from "./inlineSchema.js";
+import { addDiscriminatorConst, AddDiscriminatorConstOptions, ConstMode } from "./addDiscriminatorConst.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -389,6 +390,47 @@ export async function runInlineSchema(
 
   if (result.discriminatorWarnings.length > 0) {
     console.error(`[INLINE-SCHEMA] ${result.discriminatorWarnings.length} discriminator warning(s) encountered.`);
+  }
+
+  await writeOutput(doc, opts.output, format);
+}
+
+/**
+ * Add const/enum constraints to oneOf children based on discriminator mappings.
+ * 
+ * Targets schemas with oneOf + discriminator.mapping. For each mapped child,
+ * adds a constraint to the child's allOf array if not already present.
+ * 
+ * Mode behavior:
+ * - 'auto' (default): examines OAS version; 3.0.x → const, 3.1.x → enum
+ * - 'const' or 'enum': explicitly use that construct
+ * - 'adapt': use const and upgrade OAS 3.0.x → 3.1.0
+ * 
+ * @param opts - Options including mode and output path
+ * @param format - Function to format output
+ * @param reader - Function to read input
+ */
+export async function runAddDiscriminatorConst(
+  opts: { mode?: ConstMode; output?: string },
+  format: (doc: any, target?: string) => string,
+  reader: () => Promise<string>
+) {
+  const doc = parseYamlOrJson(await reader());
+
+  if (!validateComponentSchemas(doc)) return;
+
+  const result = addDiscriminatorConst(doc, {
+    mode: opts.mode || 'auto',
+  });
+
+  if (result.schemasUpdated > 0) {
+    console.error(`[ADD-DISCRIMINATOR-CONST] Updated ${result.schemasUpdated} schema(s) with ${result.constAdded} constraint(s).`);
+  } else {
+    console.error(`[INFO] No oneOf schemas with discriminator mappings found.`);
+  }
+
+  if (result.versionUpgraded) {
+    console.error(`[ADD-DISCRIMINATOR-CONST] Upgraded OpenAPI version to 3.1.0 (adapt mode).`);
   }
 
   await writeOutput(doc, opts.output, format);

@@ -7,6 +7,7 @@ import CleanupDiscriminatorsDecorator from "./cleanup-discriminator-decorator.js
 import RemoveDanglingDecorator from "./remove-dangling-decorator.js";
 import RemoveSingleCompositionDecorator from "./remove-single-composition-decorator.js";
 import InlineSchemaDecorator from "./inline-schema-decorator.js";
+import AddDiscriminatorConstDecorator from "./add-discriminator-const-decorator.js";
 
 export default function oasRemoveUnusedPlugin() {
   return {
@@ -23,6 +24,7 @@ export default function oasRemoveUnusedPlugin() {
     "remove-dangling-refs": RemoveDanglingDecorator,
     "remove-single-composition": RemoveSingleCompositionDecorator,
     "inline-schema": InlineSchemaDecorator,
+    "add-discriminator-const": AddDiscriminatorConstDecorator,
     // Back-compat aliases
     "remove-unused-schemas": RemoveUnusedDecorator,
     "remove-from-oneof": RemoveFromOneOfDecorator,
@@ -38,6 +40,7 @@ export default function oasRemoveUnusedPlugin() {
     "remove-dangling-refs": RemoveDanglingDecorator,
     "remove-single-composition": RemoveSingleCompositionDecorator,
     "inline-schema": InlineSchemaDecorator,
+    "add-discriminator-const": AddDiscriminatorConstDecorator,
     // Back-compat aliases
     "remove-unused-schemas": RemoveUnusedDecorator,
     "remove-from-oneof": RemoveFromOneOfDecorator,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { Command } from "commander";
-import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators, runRemoveSingleComposition, runInlineSchema } from "./lib/cliActions.js";
+import { runRemoveUnused, runRemoveOneOf, optimizeAllOf, runAllOfToOneOf, runSealSchema, runCleanupDiscriminators, runRemoveSingleComposition, runInlineSchema, runAddDiscriminatorConst } from "./lib/cliActions.js";
 import YAML from "yaml";
 import {dropNulls} from "./lib/utils.js";
 import { createRequire } from "node:module";
@@ -302,6 +302,40 @@ program
           format,
           () => reader(input)
         );
+      } catch (err: any) {
+        console.error(`Error: ${err?.message || String(err)}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+program
+  .command("add-discriminator-const")
+  .showHelpAfterError()
+  .description("Add const/enum constraints to oneOf children based on discriminator mappings")
+  .argument(
+    "[input]",
+    "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
+  )
+  .option(
+    "-o, --output <file>",
+    "Write result to this file (defaults to stdout)"
+  )
+  .option(
+    "--mode <mode>",
+    "Constraint mode: 'auto' (default) uses const for OAS 3.0.x and enum for 3.1.x, 'const' always uses const, 'enum' always uses enum, 'adapt' uses const and upgrades OAS 3.0.x to 3.1.0",
+    "auto"
+  )
+  .action(
+    async (
+      input: string | undefined,
+      opts: { output?: string; mode?: string }
+    ) => {
+      try {
+        if (!['auto', 'const', 'enum', 'adapt'].includes(opts.mode || 'auto')) {
+          throw new Error(`Invalid mode: ${opts.mode}. Must be one of: auto, const, enum, adapt`);
+        }
+        await runAddDiscriminatorConst({ mode: opts.mode as any, output: opts.output }, format, () => reader(input));
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;

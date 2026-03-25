@@ -1,6 +1,7 @@
 import { JSONPath } from 'jsonpath-plus';
 import { AllOfToOneOfOptions } from './allOfToOneOfInterface.js';
 import { refToName, buildInheritanceGraph, getDescendants, getAncestors } from './oasUtils.js';
+import { createConstConstraint, hasConstOrEnumConstraint } from './addDiscriminatorConst.js';
 
 /**
  * Third implementation of allOfToOneOf using JSONPath library.
@@ -364,11 +365,6 @@ function addDiscriminatorConstToChildren(
       .filter((pair): pair is [string, string] => pair[0] !== undefined)
   );
 
-  const createConstConstraint = (propName: string, value: string): SchemaObject => ({
-    type: 'object',
-    properties: { [propName]: { const: value } }
-  });
-
   for (const childName of childNames) {
     const childSchema = schemas[childName];
     const discriminatorValue = childToDiscValue.get(childName);
@@ -381,7 +377,7 @@ function addDiscriminatorConstToChildren(
       schemas[wrapperName] = {
         allOf: [
           { $ref: `#/components/schemas/${parentName}` },
-          createConstConstraint(discInfo.propertyName, discriminatorValue)
+          createConstConstraint(discInfo.propertyName, discriminatorValue, 'const')
         ]
       };
       updatedMapping[discriminatorValue] = `#/components/schemas/${wrapperName}`;
@@ -400,16 +396,9 @@ function addDiscriminatorConstToChildren(
       childSchema.allOf = [];
     }
 
-    const constExists = childSchema.allOf.some(
-      (item): item is SchemaObject =>
-        isValidObject(item) &&
-        isValidObject(item.properties) &&
-        isValidObject(item.properties[discInfo.propertyName]) &&
-        (item.properties[discInfo.propertyName] as Record<string, unknown>).const === discriminatorValue
-    );
-
-    if (!constExists) {
-      childSchema.allOf.push(createConstConstraint(discInfo.propertyName, discriminatorValue));
+    // Use shared helper to check for existing constraint
+    if (!hasConstOrEnumConstraint(childSchema, discInfo.propertyName, discriminatorValue)) {
+      childSchema.allOf.push(createConstConstraint(discInfo.propertyName, discriminatorValue, 'const'));
     }
   }
 
