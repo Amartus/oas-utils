@@ -1,32 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { inlineSchema, batchInlineSchemas } from "../src/lib/inlineSchema.js";
+import { ref, objectSchema, createDoc } from "./testBuilders.js";
+
+function allOfChild(parent: string, props: Record<string, any> = {}): any {
+  return { allOf: [{ $ref: ref(parent) }, objectSchema(props)] };
+}
 
 describe("inlineSchema", () => {
   describe("basic inlining", () => {
     it("should inline a simple schema in allOf", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Base: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-              },
-            },
-            Derived: {
-              allOf: [
-                { $ref: "#/components/schemas/Base" },
-                {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                  },
-                },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          Base: objectSchema({ id: { type: "string" } }),
+          Derived: allOfChild("Base", { name: { type: "string" } }),
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Base");
 
@@ -51,34 +39,13 @@ describe("inlineSchema", () => {
     });
 
     it("should handle inlining when schema has allOf", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: {
-              type: "object",
-              properties: { a: { type: "string" } },
-            },
-            B: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                {
-                  type: "object",
-                  properties: { b: { type: "string" } },
-                },
-              ],
-            },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/B" },
-                {
-                  type: "object",
-                  properties: { c: { type: "string" } },
-                },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: allOfChild("A", { b: { type: "string" } }),
+          C: allOfChild("B", { c: { type: "string" } }),
         },
-      };
+      });
 
       const result = inlineSchema(doc, "B");
 
@@ -100,22 +67,13 @@ describe("inlineSchema", () => {
     });
 
     it("should inline in multiple schemas", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Base: {
-              type: "object",
-              properties: { id: { type: "string" } },
-            },
-            Derived1: {
-              allOf: [{ $ref: "#/components/schemas/Base" }],
-            },
-            Derived2: {
-              allOf: [{ $ref: "#/components/schemas/Base" }],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          Base: objectSchema({ id: { type: "string" } }),
+          Derived1: { allOf: [{ $ref: ref("Base") }] },
+          Derived2: { allOf: [{ $ref: ref("Base") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Base");
 
@@ -136,34 +94,13 @@ describe("inlineSchema", () => {
 
   describe("chain mode", () => {
     it("should inline transitively in chain mode", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: {
-              type: "object",
-              properties: { a: { type: "string" } },
-            },
-            B: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                {
-                  type: "object",
-                  properties: { b: { type: "string" } },
-                },
-              ],
-            },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/B" },
-                {
-                  type: "object",
-                  properties: { c: { type: "string" } },
-                },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: allOfChild("A", { b: { type: "string" } }),
+          C: allOfChild("B", { c: { type: "string" } }),
         },
-      };
+      });
 
       const result = inlineSchema(doc, "B", { chain: true });
 
@@ -196,31 +133,14 @@ describe("inlineSchema", () => {
     });
 
     it("should handle deep chains in chain mode", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { type: "object", properties: { b: { type: "string" } } },
-              ],
-            },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/B" },
-                { type: "object", properties: { c: { type: "string" } } },
-              ],
-            },
-            D: {
-              allOf: [
-                { $ref: "#/components/schemas/C" },
-                { type: "object", properties: { d: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: allOfChild("A", { b: { type: "string" } }),
+          C: allOfChild("B", { c: { type: "string" } }),
+          D: allOfChild("C", { d: { type: "string" } }),
         },
-      };
+      });
 
       const result = inlineSchema(doc, "C", { chain: true });
 
@@ -234,26 +154,13 @@ describe("inlineSchema", () => {
 
   describe("different combiners", () => {
     it("should work with oneOf", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Option1: {
-              type: "object",
-              properties: { type: { const: "option1" } },
-            },
-            Option2: {
-              type: "object",
-              properties: { type: { const: "option2" } },
-            },
-            Union: {
-              oneOf: [
-                { $ref: "#/components/schemas/Option1" },
-                { $ref: "#/components/schemas/Option2" },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          Option1: objectSchema({ type: { const: "option1" } }),
+          Option2: objectSchema({ type: { const: "option2" } }),
+          Union: { oneOf: [{ $ref: ref("Option1") }, { $ref: ref("Option2") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Option1", { combiner: "oneOf" });
 
@@ -269,22 +176,12 @@ describe("inlineSchema", () => {
     });
 
     it("should work with anyOf", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Trait1: {
-              type: "object",
-              properties: { trait1: { type: "boolean" } },
-            },
-            Combined: {
-              anyOf: [
-                { $ref: "#/components/schemas/Trait1" },
-                { type: "object", properties: { other: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          Trait1: objectSchema({ trait1: { type: "boolean" } }),
+          Combined: { anyOf: [{ $ref: ref("Trait1") }, objectSchema({ other: { type: "string" } })] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Trait1", { combiner: "anyOf" });
 
@@ -299,24 +196,12 @@ describe("inlineSchema", () => {
     });
 
     it("should inline schema with oneOf into allOf when combiner is allOf", () => {
-      const doc = {
-        components: {
-          schemas: {
-            OptionSchema: {
-              oneOf: [
-                { type: "string" },
-                { type: "number" },
-              ],
-            },
-            Container: {
-              allOf: [
-                { $ref: "#/components/schemas/OptionSchema" },
-                { type: "object", properties: { id: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          OptionSchema: { oneOf: [{ type: "string" }, { type: "number" }] },
+          Container: { allOf: [{ $ref: ref("OptionSchema") }, objectSchema({ id: { type: "string" } })] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "OptionSchema", { combiner: "allOf" });
 
@@ -338,20 +223,13 @@ describe("inlineSchema", () => {
 
   describe("batch inlining", () => {
     it("should inline multiple schemas", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: { type: "object", properties: { b: { type: "string" } } },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { $ref: "#/components/schemas/B" },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: objectSchema({ b: { type: "string" } }),
+          C: { allOf: [{ $ref: ref("A") }, { $ref: ref("B") }] },
         },
-      };
+      });
 
       const result = batchInlineSchemas(doc, ["A", "B"]);
 
@@ -373,25 +251,13 @@ describe("inlineSchema", () => {
     });
 
     it("should handle batch inlining with chain mode", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { type: "object", properties: { b: { type: "string" } } },
-              ],
-            },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/B" },
-                { type: "object", properties: { c: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: allOfChild("A", { b: { type: "string" } }),
+          C: allOfChild("B", { c: { type: "string" } }),
         },
-      };
+      });
 
       const result = batchInlineSchemas(doc, ["B"], { chain: true });
 
@@ -403,32 +269,17 @@ describe("inlineSchema", () => {
   describe("discriminator warnings", () => {
     it("should warn when inlined schema is in discriminator mapping", () => {
       const warnings: any[] = [];
-      const doc = {
-        components: {
-          schemas: {
-            Animal: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  dog: "#/components/schemas/Dog",
-                },
-              },
-              oneOf: [{ $ref: "#/components/schemas/Dog" }],
-            },
-            Dog: {
-              type: "object",
-              properties: {
-                type: { const: "dog" },
-                bark: { type: "string" },
-              },
-            },
-            Container: {
-              allOf: [{ $ref: "#/components/schemas/Dog" }],
-            },
+      const doc = createDoc({
+        schemas: {
+          Animal: {
+            type: "object",
+            discriminator: { propertyName: "type", mapping: { dog: ref("Dog") } },
+            oneOf: [{ $ref: ref("Dog") }],
           },
+          Dog: objectSchema({ type: { const: "dog" }, bark: { type: "string" } }),
+          Container: { allOf: [{ $ref: ref("Dog") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Dog", {
         warnDiscriminator: true,
@@ -448,31 +299,17 @@ describe("inlineSchema", () => {
 
     it("should not warn when warnDiscriminator is false", () => {
       const warnings: any[] = [];
-      const doc = {
-        components: {
-          schemas: {
-            Animal: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  dog: "#/components/schemas/Dog",
-                },
-              },
-              oneOf: [{ $ref: "#/components/schemas/Dog" }],
-            },
-            Dog: {
-              type: "object",
-              properties: {
-                type: { const: "dog" },
-              },
-            },
-            Container: {
-              allOf: [{ $ref: "#/components/schemas/Dog" }],
-            },
+      const doc = createDoc({
+        schemas: {
+          Animal: {
+            type: "object",
+            discriminator: { propertyName: "type", mapping: { dog: ref("Dog") } },
+            oneOf: [{ $ref: ref("Dog") }],
           },
+          Dog: objectSchema({ type: { const: "dog" } }),
+          Container: { allOf: [{ $ref: ref("Dog") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Dog", {
         warnDiscriminator: false,
@@ -488,13 +325,7 @@ describe("inlineSchema", () => {
 
   describe("negative cases", () => {
     it("should handle non-existent schema", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object" },
-          },
-        },
-      };
+      const doc = createDoc({ schemas: { A: objectSchema() } });
 
       const result = inlineSchema(doc, "NonExistent");
 
@@ -504,14 +335,7 @@ describe("inlineSchema", () => {
     });
 
     it("should handle schema with no references", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object" },
-            B: { type: "object" },
-          },
-        },
-      };
+      const doc = createDoc({ schemas: { A: objectSchema(), B: objectSchema() } });
 
       const result = inlineSchema(doc, "A");
 
@@ -537,16 +361,12 @@ describe("inlineSchema", () => {
     });
 
     it("should handle schema not used in specified combiner", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object" },
-            B: {
-              allOf: [{ $ref: "#/components/schemas/A" }],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema(),
+          B: { allOf: [{ $ref: ref("A") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "A", { combiner: "oneOf" });
 
@@ -555,20 +375,13 @@ describe("inlineSchema", () => {
     });
 
     it("should not modify schemas that don't reference the target", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: { type: "object", properties: { b: { type: "string" } } },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { type: "object", properties: { c: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: objectSchema({ b: { type: "string" } }),
+          C: allOfChild("A", { c: { type: "string" } }),
         },
-      };
+      });
 
       const docCopy = JSON.parse(JSON.stringify(doc));
       inlineSchema(doc, "B");
@@ -578,27 +391,13 @@ describe("inlineSchema", () => {
     });
 
     it("should handle circular references gracefully in chain mode", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: {
-              allOf: [
-                { $ref: "#/components/schemas/B" },
-                { type: "object", properties: { a: { type: "string" } } },
-              ],
-            },
-            B: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { type: "object", properties: { b: { type: "string" } } },
-              ],
-            },
-            C: {
-              allOf: [{ $ref: "#/components/schemas/A" }],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: allOfChild("B", { a: { type: "string" } }),
+          B: allOfChild("A", { b: { type: "string" } }),
+          C: { allOf: [{ $ref: ref("A") }] },
         },
-      };
+      });
 
       // Should not throw or hang
       const result = inlineSchema(doc, "A", { chain: true });
@@ -610,21 +409,13 @@ describe("inlineSchema", () => {
 
   describe("complex scenarios", () => {
     it("should handle schema with multiple allOf items", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: { type: "object", properties: { b: { type: "string" } } },
-            C: {
-              allOf: [
-                { $ref: "#/components/schemas/A" },
-                { $ref: "#/components/schemas/B" },
-                { type: "object", properties: { c: { type: "string" } } },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: objectSchema({ b: { type: "string" } }),
+          C: { allOf: [{ $ref: ref("A") }, { $ref: ref("B") }, objectSchema({ c: { type: "string" } })] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "A");
 
@@ -645,19 +436,12 @@ describe("inlineSchema", () => {
     });
 
     it("should handle inlining schema that is simple type", () => {
-      const doc = {
-        components: {
-          schemas: {
-            StringType: { type: "string" },
-            Container: {
-              allOf: [
-                { $ref: "#/components/schemas/StringType" },
-                { minLength: 5 },
-              ],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          StringType: { type: "string" },
+          Container: { allOf: [{ $ref: ref("StringType") }, { minLength: 5 }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "StringType");
 
@@ -671,21 +455,12 @@ describe("inlineSchema", () => {
     });
 
     it("should handle schema with description and other metadata", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Base: {
-              type: "object",
-              description: "Base schema",
-              properties: { id: { type: "string" } },
-              required: ["id"],
-            },
-            Derived: {
-              allOf: [{ $ref: "#/components/schemas/Base" }],
-            },
-          },
+      const doc = createDoc({
+        schemas: {
+          Base: { ...objectSchema({ id: { type: "string" } }), description: "Base schema", required: ["id"] },
+          Derived: { allOf: [{ $ref: ref("Base") }] },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "Base");
 
@@ -701,23 +476,21 @@ describe("inlineSchema", () => {
     });
 
     it("should preserve order when inlining", () => {
-      const doc = {
-        components: {
-          schemas: {
-            A: { type: "object", properties: { a: { type: "string" } } },
-            B: { type: "object", properties: { b: { type: "string" } } },
-            C: {
-              allOf: [
-                { type: "object", properties: { c1: { type: "string" } } },
-                { $ref: "#/components/schemas/A" },
-                { type: "object", properties: { c2: { type: "string" } } },
-                { $ref: "#/components/schemas/B" },
-                { type: "object", properties: { c3: { type: "string" } } },
-              ],
-            },
+      const doc = createDoc({
+        schemas: {
+          A: objectSchema({ a: { type: "string" } }),
+          B: objectSchema({ b: { type: "string" } }),
+          C: {
+            allOf: [
+              objectSchema({ c1: { type: "string" } }),
+              { $ref: ref("A") },
+              objectSchema({ c2: { type: "string" } }),
+              { $ref: ref("B") },
+              objectSchema({ c3: { type: "string" } }),
+            ],
           },
         },
-      };
+      });
 
       const result = inlineSchema(doc, "A");
 

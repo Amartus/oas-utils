@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { runRemoveSingleComposition } from "../src/lib/cliActions.js";
 import YAML from "yaml";
+import { createDoc, objectSchema, ref } from "./testBuilders.js";
 
 describe("runRemoveSingleComposition with wildcard patterns", () => {
   /** Helper to capture output from runRemoveSingleComposition */
@@ -20,21 +21,35 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
     return YAML.parse(output);
   }
 
-  it("should keep schemas matching exact pattern", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          OtherWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
+  type WrapperKind = "allOf" | "oneOf" | "anyOf";
+  interface WrapperDef {
+    kind?: WrapperKind;
+    target?: string;
+    description?: string;
+  }
+
+  function wrapperSchema(def: WrapperDef = {}): any {
+    const kind = def.kind ?? "allOf";
+    const target = def.target ?? "Target";
+    return {
+      ...(def.description ? { description: def.description } : {}),
+      [kind]: [{ $ref: ref(target) }],
     };
+  }
+
+  function makeInput(defs: Record<string, WrapperDef>): any {
+    const schemas: Record<string, any> = { Target: objectSchema() };
+    for (const [name, def] of Object.entries(defs)) {
+      schemas[name] = wrapperSchema(def);
+    }
+    return createDoc({ paths: {}, schemas });
+  }
+
+  it("should keep schemas matching exact pattern", async () => {
+    const input = makeInput({
+      LegacyWrapper: {},
+      OtherWrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: ["LegacyWrapper"] });
 
@@ -44,23 +59,11 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should keep schemas matching prefix pattern Foo*", async () => {
-    const input = {
-      components: {
-        schemas: {
-          FooWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          FooBarWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          BarWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      FooWrapper: {},
+      FooBarWrapper: {},
+      BarWrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: ["Foo*"] });
 
@@ -71,23 +74,11 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should keep schemas matching suffix pattern *Wrapper", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          DeprecatedWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Legacy: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      LegacyWrapper: {},
+      DeprecatedWrapper: {},
+      Legacy: {},
+    });
 
     const result = await captureOutput(input, { keep: ["*Wrapper"] });
 
@@ -98,23 +89,11 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should keep schemas matching substring pattern *Legacy*", async () => {
-    const input = {
-      components: {
-        schemas: {
-          MyLegacyWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          LegacyFoo: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Wrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      MyLegacyWrapper: {},
+      LegacyFoo: {},
+      Wrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: ["*Legacy*"] });
 
@@ -125,23 +104,11 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should exclude schemas matching negative pattern !*Test", async () => {
-    const input = {
-      components: {
-        schemas: {
-          UserWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          ProductTest: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          MyTest: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      UserWrapper: {},
+      ProductTest: {},
+      MyTest: {},
+    });
 
     const result = await captureOutput(input, { keep: ["!*Test"] });
 
@@ -153,26 +120,12 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should combine positive and negative patterns correctly", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyUser: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          LegacyTest: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          DeprecatedProduct: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          UserWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      LegacyUser: {},
+      LegacyTest: {},
+      DeprecatedProduct: {},
+      UserWrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: ["Legacy*", "Deprecated*", "!*Test"] });
 
@@ -184,20 +137,10 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should handle wildcard * to keep everything", async () => {
-    const input = {
-      components: {
-        schemas: {
-          Wrapper1: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Wrapper2: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      Wrapper1: {},
+      Wrapper2: {},
+    });
 
     const result = await captureOutput(input, { keep: ["*"] });
 
@@ -207,23 +150,11 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should handle multiple positive patterns", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          DeprecatedWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          OtherWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      LegacyWrapper: {},
+      DeprecatedWrapper: {},
+      OtherWrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: ["LegacyWrapper", "Deprecated*"] });
 
@@ -234,22 +165,10 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should handle aggressive mode with keep patterns", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyWrapper: {
-            description: "Legacy wrapper with description",
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          OtherWrapper: {
-            description: "Other wrapper with description",
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      LegacyWrapper: { description: "Legacy wrapper with description" },
+      OtherWrapper: { description: "Other wrapper with description" },
+    });
 
     const result = await captureOutput(input, { aggressive: true, keep: ["Legacy*"] });
 
@@ -259,20 +178,10 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should handle empty keep array (no patterns)", async () => {
-    const input = {
-      components: {
-        schemas: {
-          Wrapper1: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Wrapper2: {
-            oneOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      Wrapper1: { kind: "allOf" },
+      Wrapper2: { kind: "oneOf" },
+    });
 
     const result = await captureOutput(input, { keep: [] });
 
@@ -283,20 +192,10 @@ describe("runRemoveSingleComposition with wildcard patterns", () => {
   });
 
   it("should handle patterns with spaces (should be trimmed)", async () => {
-    const input = {
-      components: {
-        schemas: {
-          LegacyWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          OtherWrapper: {
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
-      },
-      paths: {},
-    };
+    const input = makeInput({
+      LegacyWrapper: {},
+      OtherWrapper: {},
+    });
 
     const result = await captureOutput(input, { keep: [" Legacy* ", " !Other* "] });
 

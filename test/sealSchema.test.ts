@@ -10,18 +10,18 @@ import {
   sealed,
   testSchemas,
 } from "./schemaLoader.js";
+import { createDoc, objectSchema, ref } from "./testBuilders.js";
+
+function allOfChild(parent: string, props: Record<string, any> = {}): any {
+  return { allOf: [{ $ref: ref(parent) }, objectSchema(props)] };
+}
 
 describe("sealSchema", () => {
   describe("basic sealing", () => {
     it("seals a simple direct-only object schema with unevaluatedProperties", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Pet: withoutProperties(loadSchemaFromFile("animal"), ["name"]),
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Pet: withoutProperties(loadSchemaFromFile("animal"), ["name"]),
+      } });
 
       sealSchema(doc, { useUnevaluatedProperties: true });
 
@@ -30,19 +30,9 @@ describe("sealSchema", () => {
     });
 
     it("seals a simple direct-only object schema with additionalProperties", () => {
-      const doc: any = {
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                age: { type: "integer" },
-              },
-            },
-          },
-        },
-      };
+      const doc: any = createDoc({ schemas: {
+        Pet: objectSchema({ name: { type: "string" }, age: { type: "integer" } }),
+      } });
 
       sealSchema(doc, { useUnevaluatedProperties: false });
 
@@ -51,14 +41,9 @@ describe("sealSchema", () => {
     });
 
     it("does not modify already sealed schemas", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Pet: sealed(withoutProperties(loadSchemaFromFile("animal"), ["name"]), false),
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Pet: sealed(withoutProperties(loadSchemaFromFile("animal"), ["name"]), false),
+      } });
 
       sealSchema(doc, { useUnevaluatedProperties: false });
 
@@ -69,15 +54,10 @@ describe("sealSchema", () => {
 
   describe("core/wrapper pattern for allOf extensions", () => {
     it("creates core variant for schema used in allOf", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: loadSchemasFromFiles({
-            Animal: "animal",
-            Cat: "cat",
-          }),
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: loadSchemasFromFiles({
+        Animal: "animal",
+        Cat: "cat",
+      }) });
 
       sealSchema(doc);
 
@@ -105,39 +85,10 @@ describe("sealSchema", () => {
 
     it("handles multiple levels of inheritance", () => {
       const base = withoutProperties(loadSchemaFromFile("animal"), ["name"]);
-      const pet = {
-        allOf: [
-          { $ref: "#/components/schemas/Base" },
-          {
-            type: "object",
-            properties: {
-              owner: { type: "string" },
-            },
-          },
-        ],
-      };
-      const cat = {
-        allOf: [
-          { $ref: "#/components/schemas/Pet" },
-          {
-            type: "object",
-            properties: {
-              meow: { type: "boolean" },
-            },
-          },
-        ],
-      };
+      const pet = allOfChild("Base", { owner: { type: "string" } });
+      const cat = allOfChild("Pet", { meow: { type: "boolean" } });
 
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Base: base,
-            Pet: pet,
-            Cat: cat,
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { Base: base, Pet: pet, Cat: cat } });
 
       sealSchema(doc);
 
@@ -163,20 +114,13 @@ describe("sealSchema", () => {
     });
 
     it("preserves description when creating wrapper", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Animal: withDescription(
-              withoutProperties(loadSchemaFromFile("animal"), ["name"]),
-              "An animal in the system"
-            ),
-            Cat: {
-              allOf: [{ $ref: "#/components/schemas/Animal" }],
-            },
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Animal: withDescription(
+          withoutProperties(loadSchemaFromFile("animal"), ["name"]),
+          "An animal in the system"
+        ),
+        Cat: { allOf: [{ $ref: ref("Animal") }] },
+      } });
 
       sealSchema(doc);
 
@@ -189,15 +133,10 @@ describe("sealSchema", () => {
 
   describe("composition root sealing", () => {
     it("seals allOf composition roots", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: loadSchemasFromFiles({
-            Result: "result",
-            BaseResult: "base-result",
-          }),
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: loadSchemasFromFiles({
+        Result: "result",
+        BaseResult: "base-result",
+      }) });
 
       sealSchema(doc);
 
@@ -206,31 +145,11 @@ describe("sealSchema", () => {
 
 
     it("seals schemas used in mixed allOf compositions", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Shared: {
-              type: "object",
-              properties: { id: { type: "string" } },
-            },
-            AllOfOnly: {
-              allOf: [{ $ref: "#/components/schemas/Shared" }],
-            },
-            InlineAllOf: {
-              allOf: [
-                { $ref: "#/components/schemas/Shared" },
-                {
-                  type: "object",
-                  properties: {
-                    extra: { type: "string" },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Shared: objectSchema({ id: { type: "string" } }),
+        AllOfOnly: { allOf: [{ $ref: ref("Shared") }] },
+        InlineAllOf: { allOf: [{ $ref: ref("Shared") }, objectSchema({ extra: { type: "string" } })] },
+      } });
 
       sealSchema(doc, { useUnevaluatedProperties: false });
       expect(doc.components.schemas.Shared.additionalProperties).toBeUndefined();
@@ -270,22 +189,12 @@ describe("sealSchema", () => {
 
     it("seals oneOf composition roots", () => {
       const catOption = withoutProperties(loadSchemaFromFile("animal"), ["id", "name"]);
-      const dogOption = { type: "object", properties: { bark: { type: "boolean" } } };
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            PetResponse: {
-              oneOf: [
-                { $ref: "#/components/schemas/Cat" },
-                { $ref: "#/components/schemas/Dog" },
-              ],
-            },
-            Cat: catOption,
-            Dog: dogOption,
-          },
-        },
-      };
+      const dogOption = objectSchema({ bark: { type: "boolean" } });
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        PetResponse: { oneOf: [{ $ref: ref("Cat") }, { $ref: ref("Dog") }] },
+        Cat: catOption,
+        Dog: dogOption,
+      } });
 
       sealSchema(doc);
 
@@ -294,23 +203,13 @@ describe("sealSchema", () => {
     });
 
     it("anyOf is intact", () => {
-      const option1 = { type: "object", properties: { field1: { type: "string" } } };
-      const option2 = { type: "object", properties: { field2: { type: "integer" } } };
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            FlexibleResponse: {
-              anyOf: [
-                { $ref: "#/components/schemas/Option1" },
-                { $ref: "#/components/schemas/Option2" },
-              ],
-            },
-            Option1: option1,
-            Option2: option2,
-          },
-        },
-      };
+      const option1 = objectSchema({ field1: { type: "string" } });
+      const option2 = objectSchema({ field2: { type: "integer" } });
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        FlexibleResponse: { anyOf: [{ $ref: ref("Option1") }, { $ref: ref("Option2") }] },
+        Option1: option1,
+        Option2: option2,
+      } });
 
       sealSchema(doc);
 
@@ -320,14 +219,7 @@ describe("sealSchema", () => {
 
   describe("inline object sealing", () => {
     it("seals inline objects in properties", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: loadSchemasFromFiles({
-            Person: "person",
-          }),
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: loadSchemasFromFiles({ Person: "person" }) });
 
       sealSchema(doc);
 
@@ -338,14 +230,7 @@ describe("sealSchema", () => {
     });
 
     it("seals inline objects in array items", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: loadSchemasFromFiles({
-            People: "people",
-          }),
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: loadSchemasFromFiles({ People: "people" }) });
 
       sealSchema(doc);
 
@@ -357,22 +242,11 @@ describe("sealSchema", () => {
 
   describe("complex scenarios", () => {
     it("handles mixed inheritance and direct usage", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Animal: loadSchemaFromFile("animal"),
-            Cat: loadSchemaFromFile("cat"),
-            Shelter: {
-              type: "object",
-              properties: {
-                animal: { $ref: "#/components/schemas/Animal" },
-                cat: { $ref: "#/components/schemas/Cat" },
-              },
-            },
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Animal: loadSchemaFromFile("animal"),
+        Cat: loadSchemaFromFile("cat"),
+        Shelter: objectSchema({ animal: { $ref: ref("Animal") }, cat: { $ref: ref("Cat") } }),
+      } });
 
       sealSchema(doc);
 
@@ -398,15 +272,10 @@ describe("sealSchema", () => {
     });
 
     it("does not seal non-object schemas", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Name: loadSchemaFromFile("string-name"),
-            Age: loadSchemaFromFile("integer-age"),
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Name: loadSchemaFromFile("string-name"),
+        Age: loadSchemaFromFile("integer-age"),
+      } });
 
       sealSchema(doc);
 
@@ -426,16 +295,11 @@ describe("sealSchema", () => {
 
   describe("edge cases", () => {
     it("handles schema with both allOf and direct usage", () => {
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: loadSchemasFromFiles({
-            Base: "base",
-            Extended: "extended",
-            Container: "container",
-          }),
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: loadSchemasFromFiles({
+        Base: "base",
+        Extended: "extended",
+        Container: "container",
+      }) });
 
       sealSchema(doc);
 
@@ -452,16 +316,7 @@ describe("sealSchema", () => {
     it("handles schema with existing unevaluatedProperties", () => {
       const preSealed = sealed(loadSchemaFromFile("animal"));
       const animalRef = { allOf: [{ $ref: "#/components/schemas/PreSealedSchema" }] };
-
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            PreSealedSchema: preSealed,
-            AnimalPreSealed: animalRef,
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { PreSealedSchema: preSealed, AnimalPreSealed: animalRef } });
 
       sealSchema(doc);
 
@@ -478,23 +333,9 @@ describe("sealSchema", () => {
     it("handles multiple allOf references in same schema", () => {
       const mixin1 = loadSchemaFromFile("mixin1");
       const mixin2 = loadSchemaFromFile("mixin1"); // reuse same mixin for second ref
-      const combined = {
-        allOf: [
-          { $ref: "#/components/schemas/Mixin1" },
-          { $ref: "#/components/schemas/Mixin2" },
-        ],
-      };
+      const combined = { allOf: [{ $ref: ref("Mixin1") }, { $ref: ref("Mixin2") }] };
 
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            Mixin1: mixin1,
-            Mixin2: mixin2,
-            Combined: combined,
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { Mixin1: mixin1, Mixin2: mixin2, Combined: combined } });
 
       sealSchema(doc);
 
@@ -519,14 +360,7 @@ describe("sealSchema", () => {
         examples: [{ id: "1", name: "Fluffy" }],
       });
 
-      const doc: any = {
-        openapi: "3.1.0",
-        components: {
-          schemas: {
-            PetComplete: petComplete,
-          },
-        },
-      };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { PetComplete: petComplete } });
 
       sealSchema(doc);
 
@@ -588,6 +422,7 @@ describe("sealSchema", () => {
       };
 
       sealSchema({ openapi: "3.1.0", components: { schemas: { Company: schema } } });
+  sealSchema(createDoc({ openapi: "3.1.0", schemas: { Company: schema } }));
 
       expect(schema.unevaluatedProperties).toBe(false);
       expect(schema.properties.address.unevaluatedProperties).toBe(false);
@@ -620,6 +455,7 @@ describe("sealSchema", () => {
       };
 
       sealSchema({ openapi: "3.1.0", components: { schemas: schemas } });
+  sealSchema(createDoc({ openapi: "3.1.0", schemas }));
 
       // BaseEntity should be converted 
       expect(schemas.BaseEntity.unevaluatedProperties).toBeUndefined();

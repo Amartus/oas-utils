@@ -1,42 +1,38 @@
 import { describe, it, expect } from "vitest";
 import { cleanupDiscriminatorMappings } from "../src/lib/cleanupDiscriminatorMappings.js";
+import { ref, objectSchema, createDoc } from "./testBuilders.js";
+
+function discriminatorSchema(
+  propertyName: string,
+  mapping: Record<string, string>,
+  extra: Record<string, any> = {}
+): any {
+  return {
+    type: "object",
+    ...extra,
+    discriminator: {
+      propertyName,
+      mapping: Object.fromEntries(Object.entries(mapping).map(([k, v]) => [k, ref(v)])),
+    },
+  };
+}
+
+function allOfChild(parentName: string, props: Record<string, any> = {}): any {
+  return { allOf: [{ $ref: ref(parentName) }, objectSchema(props)] };
+}
 
 describe("cleanupDiscriminatorMappings", () => {
   it("should remove mappings pointing to non-existent schemas", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Animal: {
-            type: "object",
-            properties: {
-              type: { type: "string" }
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                "keyToAnimal": "#/components/schemas/Animal",
-                "Cat": "#/components/schemas/Cat",
-                "Dog": "#/components/schemas/Dog",
-                "NonExistent": "#/components/schemas/NonExistent",
-                "NoneEx": "#/components/schemas/SomeStrangeSchema"
-              }
-            }
-          },
-          Cat: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              { type: "object", properties: { meow: { type: "boolean" } } }
-            ]
-          },
-          Dog: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              { type: "object", properties: { bark: { type: "boolean" } } }
-            ]
-          }
-        }
-      }
-    };
+    const doc = createDoc({
+      schemas: {
+        Animal: discriminatorSchema("type", {
+          keyToAnimal: "Animal", Cat: "Cat", Dog: "Dog",
+          NonExistent: "NonExistent", NoneEx: "SomeStrangeSchema",
+        }, { properties: { type: { type: "string" } } }),
+        Cat: allOfChild("Animal", { meow: { type: "boolean" } }),
+        Dog: allOfChild("Animal", { bark: { type: "boolean" } }),
+      },
+    });
 
     const result = cleanupDiscriminatorMappings(doc);
 
@@ -57,37 +53,15 @@ describe("cleanupDiscriminatorMappings", () => {
   });
 
   it("should handle schemas with valid mappings only", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Vehicle: {
-            type: "object",
-            properties: {
-              type: { type: "string" }
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                "Car": "#/components/schemas/Car",
-                "Truck": "#/components/schemas/Truck"
-              }
-            }
-          },
-          Car: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              { type: "object", properties: { doors: { type: "number" } } }
-            ]
-          },
-          Truck: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              { type: "object", properties: { capacity: { type: "number" } } }
-            ]
-          }
-        }
-      }
-    };
+    const doc = createDoc({
+      schemas: {
+        Vehicle: discriminatorSchema("type", { Car: "Car", Truck: "Truck" }, {
+          properties: { type: { type: "string" } },
+        }),
+        Car: allOfChild("Vehicle", { doors: { type: "number" } }),
+        Truck: allOfChild("Vehicle", { capacity: { type: "number" } }),
+      },
+    });
 
     const result = cleanupDiscriminatorMappings(doc);
 
@@ -103,34 +77,14 @@ describe("cleanupDiscriminatorMappings", () => {
   });
 
   it("should handle multiple discriminators", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Animal: {
-            type: "object",
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                "Cat": "#/components/schemas/Cat",
-                "Dead": "#/components/schemas/Dead"
-              }
-            }
-          },
-          Pet: {
-            type: "object",
-            discriminator: {
-              propertyName: "kind",
-              mapping: {
-                "Dog": "#/components/schemas/Dog",
-                "Ghost": "#/components/schemas/Ghost"
-              }
-            }
-          },
-          Cat: { type: "object" },
-          Dog: { type: "object" }
-        }
-      }
-    };
+    const doc = createDoc({
+      schemas: {
+        Animal: discriminatorSchema("type", { Cat: "Cat", Dead: "Dead" }),
+        Pet: discriminatorSchema("kind", { Dog: "Dog", Ghost: "Ghost" }),
+        Cat: objectSchema(),
+        Dog: objectSchema(),
+      },
+    });
 
     const result = cleanupDiscriminatorMappings(doc);
 
@@ -170,18 +124,11 @@ describe("cleanupDiscriminatorMappings", () => {
   });
 
   it("should handle schemas without discriminators", () => {
-    const doc = {
-      components: {
-        schemas: {
-          SimpleSchema: {
-            type: "object",
-            properties: {
-              name: { type: "string" }
-            }
-          }
-        }
-      }
-    };
+    const doc = createDoc({
+      schemas: {
+        SimpleSchema: objectSchema({ name: { type: "string" } }),
+      },
+    });
 
     const result = cleanupDiscriminatorMappings(doc);
 
@@ -286,44 +233,14 @@ describe("cleanupDiscriminatorMappings", () => {
 
   describe("removeDiscriminatorPatterns option", () => {
     it("should remove discriminators from schemas matching patterns", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Animal_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat",
-                  "Dog": "#/components/schemas/Dog"
-                }
-              }
-            },
-            Vehicle_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  "Car": "#/components/schemas/Car"
-                }
-              }
-            },
-            PersonRequest: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Employee": "#/components/schemas/Employee"
-                }
-              }
-            },
-            Cat: { type: "object" },
-            Dog: { type: "object" },
-            Car: { type: "object" },
-            Employee: { type: "object" }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          Animal_RES: discriminatorSchema("type", { Cat: "Cat", Dog: "Dog" }),
+          Vehicle_RES: discriminatorSchema("kind", { Car: "Car" }),
+          PersonRequest: discriminatorSchema("type", { Employee: "Employee" }),
+          Cat: objectSchema(), Dog: objectSchema(), Car: objectSchema(), Employee: objectSchema(),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc, {
         removeDiscriminatorPatterns: ["*_RES"]
@@ -344,42 +261,14 @@ describe("cleanupDiscriminatorMappings", () => {
     });
 
     it("should handle multiple patterns", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Animal_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat"
-                }
-              }
-            },
-            VehicleResponse: {
-              type: "object",
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  "Car": "#/components/schemas/Car"
-                }
-              }
-            },
-            Person: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Employee": "#/components/schemas/Employee"
-                }
-              }
-            },
-            Cat: { type: "object" },
-            Car: { type: "object" },
-            Employee: { type: "object" }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          Animal_RES: discriminatorSchema("type", { Cat: "Cat" }),
+          VehicleResponse: discriminatorSchema("kind", { Car: "Car" }),
+          Person: discriminatorSchema("type", { Employee: "Employee" }),
+          Cat: objectSchema(), Car: objectSchema(), Employee: objectSchema(),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc, {
         removeDiscriminatorPatterns: ["*_RES", "*Response"]
@@ -394,22 +283,12 @@ describe("cleanupDiscriminatorMappings", () => {
     });
 
     it("should handle patterns with no matches", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Animal: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat"
-                }
-              }
-            },
-            Cat: { type: "object" }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          Animal: discriminatorSchema("type", { Cat: "Cat" }),
+          Cat: objectSchema(),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc, {
         removeDiscriminatorPatterns: ["*_RES"]
@@ -421,26 +300,12 @@ describe("cleanupDiscriminatorMappings", () => {
     });
 
     it("should handle case-sensitive patterns", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Animal_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {}
-              }
-            },
-            Animal_res: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {}
-              }
-            }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          Animal_RES: discriminatorSchema("type", {}),
+          Animal_res: discriminatorSchema("type", {}),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc, {
         removeDiscriminatorPatterns: ["*_RES"]
@@ -453,22 +318,12 @@ describe("cleanupDiscriminatorMappings", () => {
     });
 
     it("should work without options parameter", () => {
-      const doc = {
-        components: {
-          schemas: {
-            Animal_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat"
-                }
-              }
-            },
-            Cat: { type: "object" }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          Animal_RES: discriminatorSchema("type", { Cat: "Cat" }),
+          Cat: objectSchema(),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc);
 
@@ -481,32 +336,13 @@ describe("cleanupDiscriminatorMappings", () => {
 
   describe("removeDiscriminatorMatchers option", () => {
     it("should remove discriminators using custom matchers", () => {
-      const doc = {
-        components: {
-          schemas: {
-            AnimalResponse: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat"
-                }
-              }
-            },
-            Vehicle: {
-              type: "object",
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  "Car": "#/components/schemas/Car"
-                }
-              }
-            },
-            Cat: { type: "object" },
-            Car: { type: "object" }
-          }
-        }
-      };
+      const doc = createDoc({
+        schemas: {
+          AnimalResponse: discriminatorSchema("type", { Cat: "Cat" }),
+          Vehicle: discriminatorSchema("kind", { Car: "Car" }),
+          Cat: objectSchema(), Car: objectSchema(),
+        },
+      });
 
       const result = cleanupDiscriminatorMappings(doc, {
         removeDiscriminatorMatchers: [
@@ -524,42 +360,14 @@ describe("cleanupDiscriminatorMappings", () => {
     });
 
     function crteateGhostDoc() {
-      const ghostDoc = {
-        components: {
-          schemas: {
-            Animal_RES: {
-              type: "object",
-              discriminator: {
-                propertyName: "type",
-                mapping: {
-                  "Cat": "#/components/schemas/Cat"
-                }
-              }
-            },
-            VehicleResponse: {
-              type: "object",
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  "Car": "#/components/schemas/Car"
-                }
-              }
-            },
-            InternalModel: {
-              type: "object",
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  "Ghost": "#/components/schemas/Ghost"
-                }
-              }
-            },
-            Cat: { type: "object" },
-            Car: { type: "object" }
-          }
-        }
-      };
-      return ghostDoc;
+      return createDoc({
+        schemas: {
+          Animal_RES: discriminatorSchema("type", { Cat: "Cat" }),
+          VehicleResponse: discriminatorSchema("kind", { Car: "Car" }),
+          InternalModel: discriminatorSchema("kind", { Ghost: "Ghost" }),
+          Cat: objectSchema(), Car: objectSchema(),
+        },
+      });
     }
 
     it("should evaluate patterns and custom matchers together", () => {

@@ -1,70 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { addDiscriminatorConst, createConstConstraint, hasConstOrEnumConstraint } from "../src/lib/addDiscriminatorConst.js";
-
-function ref(name: string): string {
-  return `#/components/schemas/${name}`;
-}
-
-function objectSchema(properties: Record<string, unknown> = {}): any {
-  return { type: "object", properties };
-}
-
-function constraintFragment(propName: string, value: string, kind: "const" | "enum"): any {
-  return {
-    type: "object",
-    properties: {
-      [propName]: kind === "const" ? { const: value } : { enum: [value] },
-    },
-  };
-}
-
-function hasConstraint(schema: any, propName: string, value: string, kind: "const" | "enum"): boolean {
-  if (!Array.isArray(schema?.allOf)) return false;
-  return schema.allOf.some((item: any) =>
-    kind === "const"
-      ? item?.properties?.[propName]?.const === value
-      : Array.isArray(item?.properties?.[propName]?.enum) && item.properties[propName].enum.includes(value)
-  );
-}
-
-class DocBuilder {
-  private doc: any = {
-    openapi: "3.0.0",
-    components: { schemas: {} },
-  };
-
-  withOpenApi(version: string): this {
-    this.doc.openapi = version;
-    return this;
-  }
-
-  withParent(name: string, propertyName: string, mapping: Record<string, string>): this {
-    this.doc.components.schemas[name] = {
-      oneOf: Object.values(mapping).map((schemaName) => ({ $ref: ref(schemaName) })),
-      discriminator: {
-        propertyName,
-        mapping: Object.fromEntries(
-          Object.entries(mapping).map(([discValue, schemaName]) => [discValue, ref(schemaName)])
-        ),
-      },
-    };
-    return this;
-  }
-
-  withSchema(name: string, schema: any = objectSchema()): this {
-    this.doc.components.schemas[name] = schema;
-    return this;
-  }
-
-  withInfo(title = "Test API", version = "1.0.0"): this {
-    this.doc.info = { title, version };
-    return this;
-  }
-
-  build(): any {
-    return JSON.parse(JSON.stringify(this.doc));
-  }
-}
+import {
+  TestDocBuilder,
+  objectSchema,
+  constraintFragment,
+  hasConstraint,
+  ref,
+} from "./testBuilders.js";
 
 describe("addDiscriminatorConst", () => {
   describe("createConstConstraint helper", () => {
@@ -143,7 +85,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - const mode", () => {
     it("adds const constraint to oneOf children", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Animal", "type", { cat: "Cat", dog: "Dog" })
         .withSchema("Cat", objectSchema({ name: { type: "string" } }))
@@ -170,7 +112,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - enum mode", () => {
     it("adds enum constraint to oneOf children", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.1.0")
         .withParent("Vehicle", "vehicleType", { car: "Car", truck: "Truck" })
         .withSchema("Car", objectSchema({ doors: { type: "integer" } }))
@@ -190,7 +132,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - auto mode", () => {
     it("uses const for OAS 3.0.x documents", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Pet", "petType", { cat: "Cat" })
         .withSchema("Cat")
@@ -204,7 +146,7 @@ describe("addDiscriminatorConst", () => {
     });
 
     it("uses enum for OAS 3.1.x documents", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.1.0")
         .withParent("Pet", "petType", { dog: "Dog" })
         .withSchema("Dog")
@@ -220,7 +162,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - adapt mode", () => {
     it("uses const and upgrades OAS 3.0.x to 3.1.0", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Shape", "shapeType", { circle: "Circle" })
         .withSchema("Circle")
@@ -235,7 +177,7 @@ describe("addDiscriminatorConst", () => {
     });
 
     it("does not upgrade OAS if already 3.1.0", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.1.0")
         .withParent("Shape", "shapeType", { square: "Square" })
         .withSchema("Square")
@@ -250,7 +192,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - partial constraints", () => {
     it("only updates children without existing constraints", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Status", "status", { active: "Active", inactive: "Inactive" })
         .withSchema("Active", {
@@ -327,7 +269,7 @@ describe("addDiscriminatorConst", () => {
     });
 
     it("returns zero when all children already have constraints", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Animal", "type", { cat: "Cat" })
         .withSchema("Cat", {
@@ -345,7 +287,7 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - edge cases", () => {
     it("handles multiple schemas with discriminators", () => {
-      const doc: any = new DocBuilder()
+      const doc: any = new TestDocBuilder()
         .withOpenApi("3.0.0")
         .withParent("Animal", "animalType", { cat: "Cat" })
         .withSchema("Cat")

@@ -6,6 +6,7 @@ import YAML from "yaml";
 import { AllOfToOneOfTransform } from "../src/lib/allOfToOneOfInterface.js";
 import { allOfToOneOf } from "../src/lib/allOfToOneOfJsonPath.js";
 import { testSchemas } from "./schemaLoader.js";
+import { createDoc, objectSchema, oneOfRefs, ref } from "./testBuilders.js";
 
 async function loadYaml(file: string): Promise<any> {
   const raw = await fs.readFile(file, "utf8");
@@ -14,6 +15,47 @@ async function loadYaml(file: string): Promise<any> {
 
 function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
+}
+
+function discriminatorSchema(
+  propertyName: string,
+  mapping: Record<string, string>,
+  extra: Record<string, any> = {}
+): any {
+  return {
+    type: "object",
+    ...extra,
+    discriminator: {
+      propertyName,
+      mapping: Object.fromEntries(Object.entries(mapping).map(([key, schemaName]) => [key, ref(schemaName)])),
+    },
+  };
+}
+
+function allOfChild(parentName: string, properties: Record<string, any> = {}, extra: Record<string, any> = {}): any {
+  return {
+    allOf: [{ $ref: ref(parentName) }, objectSchema(properties)],
+    ...extra,
+  };
+}
+
+function jsonResponsePath(pathName: string, schemaName: string, description = "ok"): Record<string, any> {
+  return {
+    [pathName]: {
+      get: {
+        responses: {
+          "200": {
+            description,
+            content: {
+              "application/json": {
+                schema: { $ref: ref(schemaName) },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
 }
 
 /**
@@ -209,56 +251,27 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
 
 
     it("does not uplift when children have different discriminator property names", async () => {
-      const doc: any = {
+      const doc: any = createDoc({
         openapi: "3.0.0",
-        components: {
-          schemas: {
-            Animal: {
-              oneOf: [
-                { $ref: "#/components/schemas/CatPolymorphic" },
-                { $ref: "#/components/schemas/BirdPolymorphic" }
-              ],
-              discriminator: {
-                propertyName: "kind",
-                mapping: {
-                  Cat: "#/components/schemas/CatPolymorphic",
-                  Bird: "#/components/schemas/BirdPolymorphic"
-                }
-              }
-            },
-            CatPolymorphic: {
-              oneOf: [
-                { $ref: "#/components/schemas/DomesticCat" },
-                { $ref: "#/components/schemas/WildCat" }
-              ],
-              discriminator: {
-                propertyName: "catType",
-                mapping: {
-                  Domestic: "#/components/schemas/DomesticCat",
-                  Wild: "#/components/schemas/WildCat"
-                }
-              }
-            },
-            BirdPolymorphic: {
-              oneOf: [
-                { $ref: "#/components/schemas/Sparrow" },
-                { $ref: "#/components/schemas/Eagle" }
-              ],
-              discriminator: {
-                propertyName: "birdType",
-                mapping: {
-                  Sparrow: "#/components/schemas/Sparrow",
-                  Eagle: "#/components/schemas/Eagle"
-                }
-              }
-            },
-            DomesticCat: { type: "object", properties: { name: { type: "string" } } },
-            WildCat: { type: "object", properties: { habitat: { type: "string" } } },
-            Sparrow: { type: "object", properties: { chirp: { type: "string" } } },
-            Eagle: { type: "object", properties: { wingspan: { type: "number" } } }
-          }
-        }
-      };
+        schemas: {
+          Animal: {
+            ...discriminatorSchema("kind", { Cat: "CatPolymorphic", Bird: "BirdPolymorphic" }),
+            oneOf: oneOfRefs("CatPolymorphic", "BirdPolymorphic"),
+          },
+          CatPolymorphic: {
+            ...discriminatorSchema("catType", { Domestic: "DomesticCat", Wild: "WildCat" }),
+            oneOf: oneOfRefs("DomesticCat", "WildCat"),
+          },
+          BirdPolymorphic: {
+            ...discriminatorSchema("birdType", { Sparrow: "Sparrow", Eagle: "Eagle" }),
+            oneOf: oneOfRefs("Sparrow", "Eagle"),
+          },
+          DomesticCat: objectSchema({ name: { type: "string" } }),
+          WildCat: objectSchema({ habitat: { type: "string" } }),
+          Sparrow: objectSchema({ chirp: { type: "string" } }),
+          Eagle: objectSchema({ wingspan: { type: "number" } }),
+        },
+      });
 
       const result = transform(deepClone(doc), { mergeNestedOneOf: true });
 
@@ -279,33 +292,30 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("converts allOf + discriminator to oneOf + discriminator with const properties", () => {
-    const doc: any = {
-      components: {
-        schemas: {
-          Animal: testSchemas.animalWithDiscriminator({
-            Cat: "#/components/schemas/Cat",
-            Dog: "#/components/schemas/Dog",
-          }),
-          Cat: testSchemas.catSpecialized(),
-          Dog: testSchemas.dogSpecialized(),
-          Human: {
-            type: "object",
-            required: ["id", "name"],
-            properties: {
-              id: { type: "string", example: "h1", description: "Unique identifier for the human" },
-              name: { type: "string", example: "Alex Johnson" },
-              age: { type: "integer", minimum: 0, example: 32 },
-              pets: {
-                type: "array",
-                description: "Array of animals (polymorphic via discriminator)",
-                items: { $ref: "#/components/schemas/Animal" },
-              },
+    const doc: any = createDoc({
+      schemas: {
+        Animal: testSchemas.animalWithDiscriminator({
+          Cat: ref("Cat"),
+          Dog: ref("Dog"),
+        }),
+        Cat: testSchemas.catSpecialized(),
+        Dog: testSchemas.dogSpecialized(),
+        Human: {
+          ...objectSchema({
+            id: { type: "string", example: "h1", description: "Unique identifier for the human" },
+            name: { type: "string", example: "Alex Johnson" },
+            age: { type: "integer", minimum: 0, example: 32 },
+            pets: {
+              type: "array",
+              description: "Array of animals (polymorphic via discriminator)",
+              items: { $ref: ref("Animal") },
             },
-            description: "A human who may own zero or more pets",
-          },
+          }),
+          required: ["id", "name"],
+          description: "A human who may own zero or more pets",
         },
       },
-    };
+    });
 
     const result = transform(deepClone(doc));
 
@@ -319,110 +329,40 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("converts vehicle hierarchy with commercial vehicle references", () => {
-    const doc: any = {
+    const doc: any = createDoc({
       openapi: "3.0.0",
-      components: {
-        schemas: {
-          Vehicle: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              type: { type: "string" }
+      paths: jsonResponsePath("/dealership", "Dealership", "Returns dealership"),
+      schemas: {
+        Vehicle: discriminatorSchema("type", { Car: "Car", Bike: "Bike", ElectricCar: "ElectricCar" }, {
+          properties: { id: { type: "string" }, type: { type: "string" } },
+        }),
+        Car: allOfChild("Vehicle", { seatingCapacity: { type: "number" } }, {
+          discriminator: {
+            propertyName: "type",
+            mapping: {
+              Car: ref("Car"),
+              ElectricCar: ref("ElectricCar"),
+              CommercialCar: ref("CommercialCar"),
             },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Car: "#/components/schemas/Car",
-                Bike: "#/components/schemas/Bike",
-                ElectricCar: "#/components/schemas/ElectricCar"
-              }
-            }
           },
-          Car: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              {
-                type: "object",
-                properties: {
-                  seatingCapacity: { type: "number" }
-                }
-              }
-            ],
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Car: "#/components/schemas/Car",
-                ElectricCar: "#/components/schemas/ElectricCar",
-                CommercialCar: "#/components/schemas/CommercialCar"
-              }
-            }
+        }),
+        ElectricCar: allOfChild("Car", { batteryCapacity: { type: "number" } }),
+        Bike: allOfChild("Vehicle", { engineType: { type: "string" } }),
+        CommercialCar: allOfChild("Car", { cargoCapacity: { type: "number" } }, {
+          discriminator: {
+            propertyName: "commercialKind",
+            mapping: {
+              Car: ref("Car"),
+              ElectricCar: ref("ElectricCar"),
+            },
           },
-          ElectricCar: {
-            allOf: [
-              { $ref: "#/components/schemas/Car" },
-              {
-                type: "object",
-                properties: {
-                  batteryCapacity: { type: "number" }
-                }
-              }
-            ]
-          },
-          Bike: {
-            allOf: [
-              { $ref: "#/components/schemas/Vehicle" },
-              {
-                type: "object",
-                properties: {
-                  engineType: { type: "string" }
-                }
-              }
-            ]
-          },
-          CommercialCar: {
-            allOf: [
-              { $ref: "#/components/schemas/Car" },
-              {
-                type: "object",
-                properties: {
-                  cargoCapacity: { type: "number" }
-                }
-              }
-            ],
-            discriminator: {
-              propertyName: "commercialKind",
-              mapping: {
-                Car: "#/components/schemas/Car",
-                ElectricCar: "#/components/schemas/ElectricCar"
-              }
-            }
-          },
-          Dealership: {
-            type: "object",
-            properties: {
-              primaryCar: { $ref: "#/components/schemas/Car" },
-              commercialVehicle: { $ref: "#/components/schemas/CommercialCar" }
-            }
-          }
-        }
+        }),
+        Dealership: objectSchema({
+          primaryCar: { $ref: ref("Car") },
+          commercialVehicle: { $ref: ref("CommercialCar") },
+        }),
       },
-      paths: {
-        "/dealership": {
-          get: {
-            responses: {
-              "200": {
-                description: "Returns dealership",
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Dealership" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    };
+    });
 
     const result = transform(deepClone(doc));
 
@@ -443,108 +383,27 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("handles nested polymorphic bases with independent wrappers", () => {
-    const doc: any = {
+    const doc: any = createDoc({
       openapi: "3.1.0",
-      components: {
-        schemas: {
-          Animal: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              type: { type: "string" },
-            },
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Pet: "#/components/schemas/Pet",
-                Bird: "#/components/schemas/Bird",
-              },
-            },
-          },
-          Pet: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              {
-                type: "object",
-                properties: {
-                  owner: { type: "string" },
-                },
-              },
-            ],
-            discriminator: {
-              propertyName: "type",
-              mapping: {
-                Cat: "#/components/schemas/Cat",
-                Dog: "#/components/schemas/Dog",
-              },
-            },
-          },
-          Bird: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              {
-                type: "object",
-                properties: {
-                  wingSpan: { type: "number" },
-                },
-              },
-            ],
-          },
-          Cat: {
-            allOf: [
-              { $ref: "#/components/schemas/Pet" },
-              {
-                type: "object",
-                properties: {
-                  lives: { type: "integer" },
-                },
-              },
-            ],
-          },
-          Dog: {
-            allOf: [
-              { $ref: "#/components/schemas/Pet" },
-              {
-                type: "object",
-                properties: {
-                  barkVolume: { type: "number" },
-                },
-              },
-            ],
-          },
-        },
-      },
       paths: {
-        "/byBase": {
-          get: {
-            responses: {
-              "200": {
-                description: "Base A response",
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Animal" },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "/byIntermediate": {
-          get: {
-            responses: {
-              "200": {
-                description: "Intermediate Pet response",
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Pet" },
-                  },
-                },
-              },
-            },
-          },
-        },
+        ...jsonResponsePath("/byBase", "Animal", "Base A response"),
+        ...jsonResponsePath("/byIntermediate", "Pet", "Intermediate Pet response"),
       },
-    };
+      schemas: {
+        Animal: discriminatorSchema("type", { Pet: "Pet", Bird: "Bird" }, {
+          properties: { id: { type: "string" }, type: { type: "string" } },
+        }),
+        Pet: allOfChild("Animal", { owner: { type: "string" } }, {
+          discriminator: {
+            propertyName: "type",
+            mapping: { Cat: ref("Cat"), Dog: ref("Dog") },
+          },
+        }),
+        Bird: allOfChild("Animal", { wingSpan: { type: "number" } }),
+        Cat: allOfChild("Pet", { lives: { type: "integer" } }),
+        Dog: allOfChild("Pet", { barkVolume: { type: "number" } }),
+      },
+    });
 
     const result = transform(deepClone(doc));
 
@@ -561,18 +420,12 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("does not modify documents without discriminators", () => {
-    const doc: any = {
-      components: {
-        schemas: {
-          Base: {
-            type: "object",
-          },
-          Derived: {
-            allOf: [{ $ref: "#/components/schemas/Base" }],
-          },
-        },
+    const doc: any = createDoc({
+      schemas: {
+        Base: objectSchema(),
+        Derived: { allOf: [{ $ref: ref("Base") }] },
       },
-    };
+    });
 
     const before = JSON.stringify(doc);
     const result = transform(deepClone(doc));
@@ -580,44 +433,18 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("replaces references in nested structures", () => {
-    const doc: any = {
-      paths: {
-        "/test": {
-          get: {
-            responses: {
-              "200": {
-                description: "ok",
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Animal" }
-                  }
-                }
-              }
-            }
-          }
-        }
+    const doc: any = createDoc({
+      paths: jsonResponsePath("/test", "Animal"),
+      schemas: {
+        Animal: testSchemas.animalWithDiscriminator({ Dog: ref("Dog"), Cat: ref("Cat") }),
+        Dog: testSchemas.dogSpecialized(),
+        Cat: testSchemas.catSpecialized(),
+        Pack: objectSchema({
+          leader: { $ref: ref("Animal") },
+          members: { type: "array", items: { $ref: ref("Animal") } },
+        }),
       },
-      components: {
-        schemas: {
-          Animal: testSchemas.animalWithDiscriminator({
-            Dog: "#/components/schemas/Dog",
-            Cat: "#/components/schemas/Cat",
-          }),
-          Dog: testSchemas.dogSpecialized(),
-          Cat: testSchemas.catSpecialized(),
-          Pack: {
-            type: "object",
-            properties: {
-              leader: { $ref: "#/components/schemas/Animal" },
-              members: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Animal" },
-              },
-            },
-          },
-        },
-      },
-    };
+    });
 
     const result = transform(deepClone(doc));
 
@@ -628,43 +455,24 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("creates wrapper when reference is nested inside allOf item properties", () => {
-    const doc: any = {
-      components: {
-        schemas: {
-          Entity: { type: "object" },
-          Animal: {
-            allOf: [
-              { $ref: "#/components/schemas/Entity" },
-              { type: "object", properties: { name: { type: "string" } } },
-            ],
-            discriminator: {
-              propertyName: "@type",
-              mapping: {
-                Animal: "#/components/schemas/Animal",
-                Dog: "#/components/schemas/Dog",
-              },
-            },
+    const doc: any = createDoc({
+      schemas: {
+        Entity: objectSchema(),
+        Animal: allOfChild("Entity", { name: { type: "string" } }, {
+          discriminator: {
+            propertyName: "@type",
+            mapping: { Animal: ref("Animal"), Dog: ref("Dog") },
           },
-          Dog: {
-            allOf: [
-              { $ref: "#/components/schemas/Animal" },
-              { type: "object", properties: { value: { type: "string" } } },
-            ],
-          },
-          Kennel: {
-            allOf: [
-              { $ref: "#/components/schemas/Entity" },
-              {
-                type: "object",
-                properties: {
-                  pet: { $ref: "#/components/schemas/Animal" },
-                },
-              },
-            ],
-          },
+        }),
+        Dog: allOfChild("Animal", { value: { type: "string" } }),
+        Kennel: {
+          allOf: [
+            { $ref: ref("Entity") },
+            objectSchema({ pet: { $ref: ref("Animal") } }),
+          ],
         },
       },
-    };
+    });
 
     const result = transform(deepClone(doc));
 
@@ -674,16 +482,12 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
   });
 
   it("handles addDiscriminatorConst option", () => {
-    const doc: any = {
-      components: {
-        schemas: {
-          Animal: testSchemas.animalWithDiscriminator({
-            Cat: "#/components/schemas/Cat",
-          }),
-          Cat: testSchemas.catSpecialized(),
-        },
+    const doc: any = createDoc({
+      schemas: {
+        Animal: testSchemas.animalWithDiscriminator({ Cat: ref("Cat") }),
+        Cat: testSchemas.catSpecialized(),
       },
-    };
+    });
 
     const result = transform(deepClone(doc), { addDiscriminatorConst: false });
 
@@ -700,59 +504,29 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     //
     // Example: Product.allOf[1].properties.productPrice.$ref → ProductPrice
     // should become: Product.allOf[1].properties.productPrice.$ref → ProductPricePolymorphic
-    const doc: any = {
-      components: {
-        schemas: {
-          Base: {
-            type: "object",
-            properties: { id: { type: "string" } },
+    const doc: any = createDoc({
+      schemas: {
+        Base: objectSchema({ id: { type: "string" } }),
+        Price: allOfChild("Base", { amount: { type: "number" } }, {
+          discriminator: {
+            propertyName: "@type",
+            mapping: { Price: ref("Price"), PremiumPrice: ref("PremiumPrice") },
           },
-          Price: {
-            allOf: [
-              { $ref: "#/components/schemas/Base" },
-              {
-                type: "object",
-                properties: {
-                  amount: { type: "number" },
-                },
+        }),
+        PremiumPrice: allOfChild("Price", { premiumFee: { type: "number" } }),
+        Product: {
+          allOf: [
+            { $ref: ref("Base") },
+            objectSchema({
+              pricing: {
+                type: "array",
+                items: { $ref: ref("Price") },
               },
-            ],
-            discriminator: {
-              propertyName: "@type",
-              mapping: {
-                Price: "#/components/schemas/Price",
-                PremiumPrice: "#/components/schemas/PremiumPrice",
-              },
-            },
-          },
-          PremiumPrice: {
-            allOf: [
-              { $ref: "#/components/schemas/Price" },
-              {
-                type: "object",
-                properties: {
-                  premiumFee: { type: "number" },
-                },
-              },
-            ],
-          },
-          Product: {
-            allOf: [
-              { $ref: "#/components/schemas/Base" },
-              {
-                type: "object",
-                properties: {
-                  pricing: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Price" },
-                  },
-                },
-              },
-            ],
-          },
+            }),
+          ],
         },
       },
-    };
+    });
 
     const result = transform(deepClone(doc));
 

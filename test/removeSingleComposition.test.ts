@@ -1,36 +1,51 @@
 import { describe, it, expect } from "vitest";
 import { removeSingleComposition } from "../src/lib/removeSingleComposition.js";
+import { createDoc, objectSchema, ref } from "./testBuilders.js";
 
-describe("removeSingleComposition", () => {
-  it("should remove a single allOf wrapper and rewrite references", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Foo: {
-            allOf: [{ $ref: "#/components/schemas/Bar" }],
-          },
-          Bar: {
-            type: "object",
-            properties: { name: { type: "string" } },
-          },
-        },
-      },
-      paths: {
-        "/test": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Foo" },
-                  },
-                },
-              },
+type WrapperKind = "allOf" | "oneOf" | "anyOf";
+
+function wrapper(target: string, kind: WrapperKind = "allOf", extra: Record<string, unknown> = {}): any {
+  return {
+    ...extra,
+    [kind]: [{ $ref: ref(target) }],
+  };
+}
+
+function jsonResponse(schemaName: string): any {
+  return {
+    get: {
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: ref(schemaName) },
             },
           },
         },
       },
-    };
+    },
+  };
+}
+
+function docWithSchemasAndPaths(
+  schemas: Record<string, any>,
+  pathToSchema: Record<string, string> = {}
+): any {
+  const paths = Object.fromEntries(
+    Object.entries(pathToSchema).map(([path, schemaName]) => [path, jsonResponse(schemaName)])
+  );
+  return createDoc({ schemas, paths });
+}
+
+describe("removeSingleComposition", () => {
+  it("should remove a single allOf wrapper and rewrite references", () => {
+    const doc = docWithSchemasAndPaths(
+      {
+        Foo: wrapper("Bar"),
+        Bar: objectSchema({ name: { type: "string" } }),
+      },
+      { "/test": "Foo" }
+    );
 
     const result = removeSingleComposition(doc);
 
@@ -40,35 +55,17 @@ describe("removeSingleComposition", () => {
     expect(doc.components.schemas.Bar).toBeDefined();
     expect(
       doc.paths["/test"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/Bar");
+    ).toBe(ref("Bar"));
   });
 
   it("should remove a single anyOf wrapper", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Wrapper: {
-            anyOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
+    const doc = docWithSchemasAndPaths(
+      {
+        Wrapper: wrapper("Target", "anyOf"),
+        Target: objectSchema(),
       },
-      paths: {
-        "/x": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Wrapper" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    };
+      { "/x": "Wrapper" }
+    );
 
     const result = removeSingleComposition(doc);
 
@@ -76,35 +73,17 @@ describe("removeSingleComposition", () => {
     expect(result.removed).toContain("Wrapper");
     expect(
       doc.paths["/x"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/Target");
+    ).toBe(ref("Target"));
   });
 
   it("should remove a single oneOf wrapper", () => {
-    const doc = {
-      components: {
-        schemas: {
-          Wrapper: {
-            oneOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
+    const doc = docWithSchemasAndPaths(
+      {
+        Wrapper: wrapper("Target", "oneOf"),
+        Target: objectSchema(),
       },
-      paths: {
-        "/x": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/Wrapper" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    };
+      { "/x": "Wrapper" }
+    );
 
     const result = removeSingleComposition(doc);
 
@@ -112,54 +91,18 @@ describe("removeSingleComposition", () => {
     expect(result.removed).toContain("Wrapper");
     expect(
       doc.paths["/x"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/Target");
+    ).toBe(ref("Target"));
   });
 
   it("should resolve transitive chains", () => {
-    const doc = {
-      components: {
-        schemas: {
-          A: {
-            allOf: [{ $ref: "#/components/schemas/B" }],
-          },
-          B: {
-            oneOf: [{ $ref: "#/components/schemas/C" }],
-          },
-          C: {
-            type: "object",
-            properties: { value: { type: "number" } },
-          },
-        },
+    const doc = docWithSchemasAndPaths(
+      {
+        A: wrapper("B"),
+        B: wrapper("C", "oneOf"),
+        C: objectSchema({ value: { type: "number" } }),
       },
-      paths: {
-        "/a": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/A" },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "/b": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/B" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    };
+      { "/a": "A", "/b": "B" }
+    );
 
     const result = removeSingleComposition(doc);
 
@@ -171,24 +114,21 @@ describe("removeSingleComposition", () => {
     expect(doc.components.schemas.C).toBeDefined();
     expect(
       doc.paths["/a"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/C");
+    ).toBe(ref("C"));
     expect(
       doc.paths["/b"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/C");
+    ).toBe(ref("C"));
   });
 
   it("should not remove schemas with additional top-level properties", () => {
-    const doc = {
-      components: {
-        schemas: {
-          WithDescription: {
-            description: "A wrapper with description",
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
+    const doc = createDoc({
+      schemas: {
+        WithDescription: wrapper("Target", "allOf", {
+          description: "A wrapper with description",
+        }),
+        Target: objectSchema(),
       },
-    };
+    });
 
     const result = removeSingleComposition(doc);
 
@@ -197,32 +137,15 @@ describe("removeSingleComposition", () => {
   });
 
   it("should remove schemas with description in aggressive mode", () => {
-    const doc = {
-      components: {
-        schemas: {
-          WithDescription: {
-            description: "A wrapper with description",
-            allOf: [{ $ref: "#/components/schemas/Target" }],
-          },
-          Target: { type: "object" },
-        },
+    const doc = docWithSchemasAndPaths(
+      {
+        WithDescription: wrapper("Target", "allOf", {
+          description: "A wrapper with description",
+        }),
+        Target: objectSchema(),
       },
-      paths: {
-        "/x": {
-          get: {
-            responses: {
-              "200": {
-                content: {
-                  "application/json": {
-                    schema: { $ref: "#/components/schemas/WithDescription" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    };
+      { "/x": "WithDescription" }
+    );
 
     const result = removeSingleComposition(doc, { aggressive: true });
 
@@ -231,7 +154,7 @@ describe("removeSingleComposition", () => {
     expect(doc.components.schemas.WithDescription).toBeUndefined();
     expect(
       doc.paths["/x"].get.responses["200"].content["application/json"].schema.$ref
-    ).toBe("#/components/schemas/Target");
+    ).toBe(ref("Target"));
   });
 
   it("should remove schemas with discriminator in aggressive mode", () => {
