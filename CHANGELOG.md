@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0] - 2026-03-28
+### Added
+- New `addDiscriminatorConst` transformation that adds `const`/`enum` constraints to oneOf branches based on discriminator mappings.
+- `add-discriminator-const` CLI command with `--mode` (`auto`/`const`/`enum`/`adapt`) and `--placement` (`oneOf-branches`/`children`) options.
+- `add-discriminator-const` Redocly decorator (`oas-utils/add-discriminator-const`).
+- `compatibilityMode` option to skip adding constraints to intermediate/base types in multi-level inheritance hierarchies.
+- `--adapt` mode that automatically upgrades OAS 3.0.x documents to 3.1.0 when `const` constraints are needed.
+
+### Changed
+- `allOfToOneOf` now reuses shared `createConstConstraint` and `hasConstOrEnumConstraint` helpers from `addDiscriminatorConst`, removing internal duplicates.
+- Refactored test suite to improve code reuse via shared `testBuilders.ts` helpers.
+
 ## [0.9.1] - 2026-03-13
 ### Added
 - Added `removeDiscriminatorMatchers` support in `cleanupDiscriminatorMappings` options to allow custom predicate-driven discriminator removal.

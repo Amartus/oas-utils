@@ -1,7 +1,8 @@
 import { JSONPath } from 'jsonpath-plus';
 import { AllOfToOneOfOptions } from './allOfToOneOfInterface.js';
 import { refToName, buildInheritanceGraph, getDescendants, getAncestors } from './oasUtils.js';
-import { createConstConstraint, hasConstOrEnumConstraint } from './addDiscriminatorConst.js';
+import { addDiscriminatorConst as applyDiscriminatorConst } from './addDiscriminatorConst.js';
+import { createConstConstraint, hasConstOrEnumConstraint } from './discriminatorConstraintUtils.js';
 
 /**
  * Third implementation of allOfToOneOf using JSONPath library.
@@ -756,10 +757,15 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
   const schemas = doc?.components?.schemas;
   if (!isValidObject(doc) || !isValidObject(schemas)) return doc;
 
+  const shouldAddDiscriminatorConst = opts.addDiscriminatorConst !== false;
+  const shouldAddConstToExistingOneOf = opts.addDiscriminatorConstToExistingOneOf === true;
+
   const discriminatorParents = findDiscriminatorParents(schemas);
 
   // Early exit if nothing to do
-  if (discriminatorParents.size === 0 && !opts.mergeNestedOneOf) return doc;
+  if (discriminatorParents.size === 0 && !opts.mergeNestedOneOf && !(shouldAddDiscriminatorConst && shouldAddConstToExistingOneOf)) {
+    return doc;
+  }
 
   const inheritanceGraph = buildInheritanceGraph(schemas);
   const wrappers = createPolymorphicWrappers(schemas, discriminatorParents, inheritanceGraph, doc, opts);
@@ -777,6 +783,16 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
 
   if (wrappers.size > 0) {
     removeDiscriminatorFromParents(schemas, wrappers, doc);
+  }
+
+  // Post-pass: apply discriminator consts to all oneOf+discriminator schemas,
+  // including schemas that already existed in the source document.
+  if (shouldAddDiscriminatorConst && shouldAddConstToExistingOneOf) {
+    applyDiscriminatorConst(doc, {
+      mode: 'const',
+      placement: opts.discriminatorConstPlacement ?? 'oneOf-branches',
+      compatibilityMode: opts.discriminatorConstCompatibilityMode ?? true,
+    });
   }
 
   return doc;

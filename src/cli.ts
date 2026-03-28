@@ -113,6 +113,21 @@ program
     true
   )
   .option(
+    "--no-add-discriminator-const-to-existing-oneof",
+    "Do not add discriminator consts for pre-existing oneOf schemas",
+    true
+  )
+  .option(
+    "--no-discriminator-const-compatibility-mode",
+    "Do not skip allOf parent schemas when adding discriminator consts",
+    true
+  )
+  .option(
+    "--discriminator-const-placement <placement>",
+    "Placement for discriminator constraints: 'oneOf-branches' (default) or 'children'",
+    "oneOf-branches"
+  )
+  .option(
     "--ignore-single-specialization",
     "Skip oneOf transformation if only one specialization is found",
     false
@@ -125,10 +140,29 @@ program
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean }
+      opts: {
+        output?: string;
+        addDiscriminatorConst?: boolean;
+        addDiscriminatorConstToExistingOneof?: boolean;
+        discriminatorConstCompatibilityMode?: boolean;
+        discriminatorConstPlacement?: string;
+        ignoreSingleSpecialization?: boolean;
+        mergeNestedOneof?: boolean;
+      }
     ) => {
       try {
-        await runAllOfToOneOf(opts, format, () => reader(input));
+        if (!['oneOf-branches', 'children'].includes(opts.discriminatorConstPlacement || 'oneOf-branches')) {
+          throw new Error(`Invalid discriminatorConstPlacement: ${opts.discriminatorConstPlacement}. Must be one of: oneOf-branches, children`);
+        }
+        await runAllOfToOneOf(
+          {
+            ...opts,
+            addDiscriminatorConstToExistingOneOf: opts.addDiscriminatorConstToExistingOneof,
+            discriminatorConstPlacement: opts.discriminatorConstPlacement as any,
+          },
+          format,
+          () => reader(input)
+        );
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;
@@ -312,7 +346,7 @@ program
 program
   .command("add-discriminator-const")
   .showHelpAfterError()
-  .description("Add const/enum constraints to oneOf children based on discriminator mappings")
+  .description("Add const/enum constraints based on discriminator mappings")
   .argument(
     "[input]",
     "Path to input OpenAPI file (YAML or JSON). If omitted, reads from stdin"
@@ -326,16 +360,38 @@ program
     "Constraint mode: 'auto' (default) uses const for OAS 3.0.x and enum for 3.1.x, 'const' always uses const, 'enum' always uses enum, 'adapt' uses const and upgrades OAS 3.0.x to 3.1.0",
     "auto"
   )
+  .option(
+    "--placement <placement>",
+    "Constraint placement: 'oneOf-branches' (default) or 'children' (legacy)",
+    "oneOf-branches"
+  )
+  .option(
+    "--compatibility-mode",
+    "Skip allOf parent schemas when placement=children",
+    false
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; mode?: string }
+      opts: { output?: string; mode?: string; placement?: string; compatibilityMode?: boolean }
     ) => {
       try {
         if (!['auto', 'const', 'enum', 'adapt'].includes(opts.mode || 'auto')) {
           throw new Error(`Invalid mode: ${opts.mode}. Must be one of: auto, const, enum, adapt`);
         }
-        await runAddDiscriminatorConst({ mode: opts.mode as any, output: opts.output }, format, () => reader(input));
+        if (!['oneOf-branches', 'children'].includes(opts.placement || 'oneOf-branches')) {
+          throw new Error(`Invalid placement: ${opts.placement}. Must be one of: oneOf-branches, children`);
+        }
+        await runAddDiscriminatorConst(
+          {
+            mode: opts.mode as any,
+            placement: opts.placement as any,
+            compatibilityMode: opts.compatibilityMode,
+            output: opts.output,
+          },
+          format,
+          () => reader(input)
+        );
       } catch (err: any) {
         console.error(`Error: ${err?.message || String(err)}`);
         process.exitCode = 1;

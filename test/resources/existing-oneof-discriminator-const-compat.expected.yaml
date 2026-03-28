@@ -1,0 +1,60 @@
+openapi: 3.0.0
+info:
+  title: Existing oneOf discriminator const compatibility
+  version: 1.0.0
+
+paths:
+  /animals:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimalOrRef"
+
+components:
+  schemas:
+    EntityRef:
+      type: object
+      properties:
+        id:
+          type: string
+
+    AnimalRef:
+      type: object
+      description: Animal reference.
+      allOf:
+        - $ref: "#/components/schemas/EntityRef"
+
+    AnimalRefExt:
+      description: Animal reference with extra tracking details.
+      allOf:
+        - $ref: "#/components/schemas/AnimalRef"
+        - type: object
+          properties:
+            trackingCode:
+              type: string
+
+    AnimalOrRef:
+      type: object
+      description: Animal entity or animal reference.
+      oneOf:
+        - allOf:
+            - $ref: "#/components/schemas/AnimalRef"
+            - type: object
+              properties:
+                "@type":
+                  const: AnimalRef
+        - allOf:
+            - $ref: "#/components/schemas/AnimalRefExt"
+            - type: object
+              properties:
+                "@type":
+                  const: AnimalRefExt
+      discriminator:
+        propertyName: "@type"
+        mapping:
+          AnimalRef: "#/components/schemas/AnimalRef"
+          AnimalRefExt: "#/components/schemas/AnimalRefExt"

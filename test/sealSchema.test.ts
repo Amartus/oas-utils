@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { allOfToOneOf } from "../src/lib/allOfToOneOfJsonPath.js";
 import { sealSchema } from "../src/lib/sealSchema.js";
 import {
   loadSchemaFromFile,
@@ -10,7 +11,7 @@ import {
   sealed,
   testSchemas,
 } from "./schemaLoader.js";
-import { createDoc, objectSchema, ref } from "./testBuilders.js";
+import { createDoc, objectSchema, oneOfRefs, ref } from "./testBuilders.js";
 
 function allOfChild(parent: string, props: Record<string, any> = {}): any {
   return { allOf: [{ $ref: ref(parent) }, objectSchema(props)] };
@@ -128,6 +129,127 @@ describe("sealSchema", () => {
         "An animal in the system"
       );
       expect(doc.components.schemas.AnimalCore).toBeUndefined();
+    });
+
+    it("does not create conflicting parent discriminator consts in Core schemas after allOfToOneOf (default branch placement)", () => {
+      const doc: any = createDoc({
+        openapi: "3.1.0",
+        schemas: {
+          EntityRef: objectSchema({ id: { type: "string" } }),
+          AnimalRef: {
+            type: "object",
+            description: "Animal reference.",
+            allOf: [{ $ref: ref("EntityRef") }],
+          },
+          AnimalRefExt: {
+            description: "Animal reference with extra tracking details.",
+            allOf: [
+              { $ref: ref("AnimalRef") },
+              objectSchema({ trackingCode: { type: "string" } }),
+            ],
+          },
+          AnimalOrRef: {
+            type: "object",
+            oneOf: oneOfRefs("AnimalRef", "AnimalRefExt"),
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                AnimalRef: ref("AnimalRef"),
+                AnimalRefExt: ref("AnimalRefExt"),
+              },
+            },
+          },
+        },
+      });
+
+      // Default branch placement: constraints go into oneOf branches, not child schemas
+      allOfToOneOf(doc, {
+        addDiscriminatorConst: true,
+        addDiscriminatorConstToExistingOneOf: true,
+        discriminatorConstCompatibilityMode: true,
+      });
+
+      sealSchema(doc);
+
+      // With branch placement, no Core splitting is needed for AnimalRef (no const on the child)
+      expect(doc.components.schemas.AnimalRefCore).toBeUndefined();
+
+      // Constraints are on the AnimalOrRef oneOf branches, not on the schemas themselves
+      const animalRefAllOf = doc.components.schemas.AnimalRef.allOf ?? [];
+      const animalRefHasConst = animalRefAllOf.some(
+        (item: any) => item?.properties?.["@type"]?.const === "AnimalRef"
+      );
+      expect(animalRefHasConst).toBe(false);
+
+      const animalRefExtAllOf = doc.components.schemas.AnimalRefExt.allOf ?? [];
+      const animalRefExtHasConst = animalRefExtAllOf.some(
+        (item: any) => item?.properties?.["@type"]?.const === "AnimalRefExt"
+      );
+      expect(animalRefExtHasConst).toBe(false);
+
+      // Confirm constraints are on the oneOf branches
+      const animalOrRefOneOf = doc.components.schemas.AnimalOrRef.oneOf ?? [];
+      const firstBranchConst = animalOrRefOneOf[0]?.allOf?.some(
+        (item: any) => item?.properties?.["@type"]?.const === "AnimalRef"
+      );
+      expect(firstBranchConst).toBe(true);
+    });
+
+    it("does not create conflicting parent discriminator consts in Core schemas after allOfToOneOf (legacy children placement)", () => {
+      const doc: any = createDoc({
+        openapi: "3.1.0",
+        schemas: {
+          EntityRef: objectSchema({ id: { type: "string" } }),
+          AnimalRef: {
+            type: "object",
+            description: "Animal reference.",
+            allOf: [{ $ref: ref("EntityRef") }],
+          },
+          AnimalRefExt: {
+            description: "Animal reference with extra tracking details.",
+            allOf: [
+              { $ref: ref("AnimalRef") },
+              objectSchema({ trackingCode: { type: "string" } }),
+            ],
+          },
+          AnimalOrRef: {
+            type: "object",
+            oneOf: oneOfRefs("AnimalRef", "AnimalRefExt"),
+            discriminator: {
+              propertyName: "@type",
+              mapping: {
+                AnimalRef: ref("AnimalRef"),
+                AnimalRefExt: ref("AnimalRefExt"),
+              },
+            },
+          },
+        },
+      });
+
+      allOfToOneOf(doc, {
+        addDiscriminatorConst: true,
+        addDiscriminatorConstToExistingOneOf: true,
+        discriminatorConstCompatibilityMode: true,
+        discriminatorConstPlacement: "children",
+      });
+
+      sealSchema(doc);
+
+      // With children placement + compatibility mode, AnimalRef is an allOf parent so it is skipped;
+      // sealSchema creates AnimalRefCore because AnimalRefExt references AnimalRef via allOf
+      expect(doc.components.schemas.AnimalRef.allOf[0].$ref).toBe("#/components/schemas/AnimalRefCore");
+
+      const animalRefCoreAllOf = doc.components.schemas.AnimalRefCore.allOf ?? [];
+      const animalRefCoreHasConst = animalRefCoreAllOf.some(
+        (item: any) => item?.properties?.["@type"]?.const === "AnimalRef"
+      );
+      expect(animalRefCoreHasConst).toBe(false);
+
+      const animalRefExtAllOf = doc.components.schemas.AnimalRefExt.allOf ?? [];
+      const animalRefExtHasConst = animalRefExtAllOf.some(
+        (item: any) => item?.properties?.["@type"]?.const === "AnimalRefExt"
+      );
+      expect(animalRefExtHasConst).toBe(true);
     });
   });
 

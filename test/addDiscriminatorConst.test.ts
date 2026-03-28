@@ -8,7 +8,57 @@ import {
   ref,
 } from "./testBuilders.js";
 
+function hasOneOfBranchConstraint(
+  schema: any,
+  targetRef: string,
+  propName: string,
+  value: string,
+  kind: "const" | "enum"
+): boolean {
+  if (!Array.isArray(schema?.oneOf)) return false;
+
+  return schema.oneOf.some((entry: any) => {
+    if (!Array.isArray(entry?.allOf)) return false;
+    const hasRef = entry.allOf.some((item: any) => item?.$ref === ref(targetRef));
+    if (!hasRef) return false;
+    return entry.allOf.some((item: any) =>
+      kind === "const"
+        ? item?.properties?.[propName]?.const === value
+        : Array.isArray(item?.properties?.[propName]?.enum) && item.properties[propName].enum.includes(value)
+    );
+  });
+}
+
 describe("addDiscriminatorConst", () => {
+  describe("main function - default placement", () => {
+    it("adds const constraints to oneOf branches by default", () => {
+      const doc: any = new TestDocBuilder()
+        .withOpenApi("3.0.0")
+        .withParent("AnimalOrRef", "@type", { AnimalRef: "AnimalRef", AnimalRefExt: "AnimalRefExt" })
+        .withSchema("AnimalRef", {
+          type: "object",
+          allOf: [{ $ref: ref("EntityRef") }],
+        })
+        .withSchema("EntityRef", objectSchema({ id: { type: "string" } }))
+        .withSchema("AnimalRefExt", {
+          allOf: [
+            { $ref: ref("AnimalRef") },
+            objectSchema({ trackingCode: { type: "string" } }),
+          ],
+        })
+        .build();
+
+      const result = addDiscriminatorConst(doc, { mode: "const" });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(2);
+      expect(hasOneOfBranchConstraint(doc.components.schemas.AnimalOrRef, "AnimalRef", "@type", "AnimalRef", "const")).toBe(true);
+      expect(hasOneOfBranchConstraint(doc.components.schemas.AnimalOrRef, "AnimalRefExt", "@type", "AnimalRefExt", "const")).toBe(true);
+      expect(hasConstraint(doc.components.schemas.AnimalRef, "@type", "AnimalRef", "const")).toBe(false);
+      expect(hasConstraint(doc.components.schemas.AnimalRefExt, "@type", "AnimalRefExt", "const")).toBe(false);
+    });
+  });
+
   describe("createConstConstraint helper", () => {
     it("creates const constraint", () => {
       const constraint = createConstConstraint("type", "cat", "const");
@@ -92,7 +142,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Dog", objectSchema({ breed: { type: "string" } }))
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
@@ -119,7 +169,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Truck", objectSchema({ capacity: { type: "number" } }))
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "enum" });
+      const result = addDiscriminatorConst(doc, { mode: "enum", placement: "children" });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
@@ -138,7 +188,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Cat")
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "auto" });
+      const result = addDiscriminatorConst(doc, { mode: "auto", placement: "children" });
 
       expect(result.constAdded).toBe(1);
       const catSchema = doc.components.schemas.Cat;
@@ -152,7 +202,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Dog")
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "auto" });
+      const result = addDiscriminatorConst(doc, { mode: "auto", placement: "children" });
 
       expect(result.constAdded).toBe(1);
       const dogSchema = doc.components.schemas.Dog;
@@ -168,7 +218,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Circle")
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "adapt" });
+      const result = addDiscriminatorConst(doc, { mode: "adapt", placement: "children" });
 
       expect(result.versionUpgraded).toBe(true);
       expect(doc.openapi).toBe("3.1.0");
@@ -183,7 +233,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Square")
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "adapt" });
+      const result = addDiscriminatorConst(doc, { mode: "adapt", placement: "children" });
 
       expect(result.versionUpgraded).toBe(false);
       expect(doc.openapi).toBe("3.1.0");
@@ -202,7 +252,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Inactive", objectSchema())
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.constAdded).toBe(1); // Only Inactive gets updated
       expect(result.schemasUpdated).toBe(1);
@@ -231,7 +281,7 @@ describe("addDiscriminatorConst", () => {
         }
       };
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(0);
       expect(result.constAdded).toBe(0);
@@ -253,7 +303,7 @@ describe("addDiscriminatorConst", () => {
         }
       };
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(0);
       expect(result.constAdded).toBe(0);
@@ -261,7 +311,7 @@ describe("addDiscriminatorConst", () => {
 
     it("returns empty result for empty doc", () => {
       const doc: any = {};
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(0);
       expect(result.constAdded).toBe(0);
@@ -278,7 +328,7 @@ describe("addDiscriminatorConst", () => {
         })
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(0);
       expect(result.constAdded).toBe(0);
@@ -295,7 +345,7 @@ describe("addDiscriminatorConst", () => {
         .withSchema("Car")
         .build();
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(2);
       expect(result.constAdded).toBe(2);
@@ -320,10 +370,119 @@ describe("addDiscriminatorConst", () => {
         }
       };
 
-      const result = addDiscriminatorConst(doc, { mode: "const" });
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(0);
       expect(result.constAdded).toBe(0);
+    });
+
+    it("keeps default behavior when compatibility mode is disabled", () => {
+      const doc: any = new TestDocBuilder()
+        .withOpenApi("3.0.0")
+        .withSchema("A", {
+          oneOf: [
+            { $ref: ref("A") },
+            { $ref: ref("B") },
+            { $ref: ref("C") },
+          ],
+          discriminator: {
+            propertyName: "@type",
+            mapping: {
+              A: ref("A"),
+              B: ref("B"),
+              C: ref("C"),
+            },
+          },
+        })
+        .withSchema("B", {
+          allOf: [
+            { $ref: ref("A") },
+            objectSchema({ b: { type: "string" } }),
+          ],
+        })
+        .withSchema("C", {
+          allOf: [
+            { $ref: ref("A") },
+            objectSchema({ c: { type: "string" } }),
+          ],
+        })
+        .build();
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(3);
+      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(true);
+      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
+      expect(hasConstraint(doc.components.schemas.C, "@type", "C", "const")).toBe(true);
+    });
+
+    it("skips mapped allOf parent schemas in compatibility mode", () => {
+      const doc: any = new TestDocBuilder()
+        .withOpenApi("3.0.0")
+        .withSchema("A", {
+          oneOf: [
+            { $ref: ref("A") },
+            { $ref: ref("B") },
+            { $ref: ref("C") },
+          ],
+          discriminator: {
+            propertyName: "@type",
+            mapping: {
+              A: ref("A"),
+              B: ref("B"),
+              C: ref("C"),
+            },
+          },
+        })
+        .withSchema("B", {
+          allOf: [
+            { $ref: ref("A") },
+            objectSchema({ b: { type: "string" } }),
+          ],
+        })
+        .withSchema("C", {
+          allOf: [
+            { $ref: ref("A") },
+            objectSchema({ c: { type: "string" } }),
+          ],
+        })
+        .build();
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children", compatibilityMode: true });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(2);
+      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(false);
+      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
+      expect(hasConstraint(doc.components.schemas.C, "@type", "C", "const")).toBe(true);
+    });
+
+    it("does not skip mapped schema when no mapped child composes it", () => {
+      const doc: any = new TestDocBuilder()
+        .withOpenApi("3.0.0")
+        .withSchema("A", {
+          oneOf: [
+            { $ref: ref("A") },
+            { $ref: ref("B") },
+          ],
+          discriminator: {
+            propertyName: "@type",
+            mapping: {
+              A: ref("A"),
+              B: ref("B"),
+            },
+          },
+        })
+        .withSchema("B", objectSchema({ b: { type: "string" } }))
+        .build();
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children", compatibilityMode: true });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(2);
+      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(true);
+      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
     });
   });
 });

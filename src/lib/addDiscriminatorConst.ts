@@ -1,120 +1,77 @@
 /**
  * Add const/enum constraints to oneOf children based on discriminator mappings.
- * 
+ *
  * This module provides both a standalone CLI action and shared helpers
  * used by allOfToOneOfJsonPath.ts for the allOf→oneOf discriminator patterns.
  */
 
-import { refToName, getOpenApiVersion, upgradeToOas31 } from './oasUtils.js';
+import { getOpenApiVersion, upgradeToOas31 } from './oasUtils.js';
+import { addConstraintsToOneOfBranches } from './addDiscriminatorConst.oneOfBranchesStrategy.js';
+import { addConstraintsToChildren } from './addDiscriminatorConst.childrenStrategy.js';
+import { createConstConstraint, hasConstOrEnumConstraint, type Construct } from './discriminatorConstraintUtils.js';
+import type {
+  AddDiscriminatorConstOptions,
+  AddDiscriminatorConstResult,
+  ConstMode,
+  ConstPlacement,
+  DiscriminatorContext,
+} from './addDiscriminatorConst.types.js';
 
-// Type definitions
+export type {
+  AddDiscriminatorConstOptions,
+  AddDiscriminatorConstResult,
+  ConstMode,
+  ConstPlacement,
+  Construct,
+};
 
-export type Construct = 'const' | 'enum';
-
-export type ConstMode = 'auto' | 'const' | 'enum' | 'adapt';
-
-export interface AddDiscriminatorConstOptions {
-  /**
-   * Mode for selecting the constraint construct.
-   * - 'auto' (default): OAS 3.0.x → const, OAS 3.1.x → enum
-   * - 'const': always use { const: value }
-   * - 'enum': always use { enum: [value] }
-   * - 'adapt': use const and upgrade OAS 3.0.x → 3.1.0
-   */
-  mode?: ConstMode;
-  
-  /** Optional callback to receive warnings during transformation. */
-  onWarning?: (message: string) => void;
-}
-
-export interface AddDiscriminatorConstResult {
-  /** Number of schemas with one or more children updated */
-  schemasUpdated: number;
-  
-  /** Total number of discriminator children that received const/enum constraints */
-  constAdded: number;
-  
-  /** Whether OAS version was upgraded (only when mode='adapt') */
-  versionUpgraded: boolean;
-}
+export { createConstConstraint, hasConstOrEnumConstraint };
 
 // Type guards
 
 const isValidObject = (obj: unknown): obj is Record<string, unknown> =>
   obj !== null && typeof obj === 'object' && !Array.isArray(obj);
 
-const isSchemaReference = (obj: unknown): obj is { $ref: string } =>
-  isValidObject(obj) && typeof obj.$ref === 'string';
-
-// Shared helper functions (used by both addDiscriminatorConst and allOfToOneOfJsonPath)
-
-/**
- * Create a schema constraint fragment with const or enum.
- * Used by both addDiscriminatorConst and allOfToOneOfJsonPath.
- * 
- * @param propName - The discriminator property name
- * @param value - The discriminator value
- * @param construct - 'const' or 'enum'
- * @returns A schema object with the constraint
- */
-export function createConstConstraint(
-  propName: string,
-  value: string,
-  construct: Construct = 'const'
-): Record<string, unknown> {
-  if (construct === 'enum') {
-    return {
-      type: 'object',
-      properties: { [propName]: { enum: [value] } }
-    };
+function resolveConstruct(doc: Record<string, unknown>, mode: ConstMode, result: AddDiscriminatorConstResult): Construct {
+  if (mode === 'auto') {
+    const version = getOpenApiVersion(doc);
+    return version && version.match(/^3\.1\./) ? 'enum' : 'const';
   }
-  // 'const'
-  return {
-    type: 'object',
-    properties: { [propName]: { const: value } }
-  };
+
+  if (mode === 'enum') {
+    return 'enum';
+  }
+
+  if (mode === 'adapt') {
+    const oldVersion = getOpenApiVersion(doc);
+    upgradeToOas31(doc);
+    const newVersion = getOpenApiVersion(doc);
+    if (oldVersion !== newVersion) {
+      result.versionUpgraded = true;
+    }
+  }
+
+  return 'const';
 }
 
-/**
- * Check if a schema already has a const or enum constraint for a property/value.
- * Used by both addDiscriminatorConst and allOfToOneOfJsonPath.
- * 
- * @param schema - The schema to check
- * @param propName - The discriminator property name
- * @param value - The discriminator value to check for
- * @returns true if constraint already exists
- */
-export function hasConstOrEnumConstraint(
+function createDiscriminatorContext(
+  schemas: Record<string, unknown>,
   schema: Record<string, unknown>,
-  propName: string,
-  value: string
-): boolean {
-  if (!isValidObject(schema) || !Array.isArray(schema.allOf)) {
-    return false;
-  }
-
-  return (schema.allOf as unknown[]).some(item => {
-    if (!isValidObject(item) || !isValidObject(item.properties)) {
-      return false;
-    }
-    
-    const propSchema = item.properties[propName];
-    if (!isValidObject(propSchema)) {
-      return false;
-    }
-
-    // Check for const
-    if (propSchema.const === value) {
-      return true;
-    }
-
-    // Check for enum
-    if (Array.isArray(propSchema.enum) && propSchema.enum.includes(value)) {
-      return true;
-    }
-
-    return false;
-  });
+  propertyName: string,
+  mapping: Record<string, string>,
+  construct: Construct,
+  compatibilityMode: boolean,
+  result: AddDiscriminatorConstResult
+): DiscriminatorContext {
+  return {
+    schemas,
+    schema,
+    propertyName,
+    mapping,
+    construct,
+    compatibilityMode,
+    result,
+  };
 }
 
 // Main function
@@ -153,36 +110,14 @@ export function addDiscriminatorConst(
 
   const schemas = doc.components.schemas as Record<string, unknown>;
   const mode: ConstMode = opts.mode ?? 'auto';
-
-  // Determine the construct to use
-  let construct: Construct = 'const';
-  
-  if (mode === 'auto') {
-    const version = getOpenApiVersion(doc);
-    if (version && version.match(/^3\.1\./)) {
-      construct = 'enum';
-    } else {
-      construct = 'const';
-    }
-  } else if (mode === 'const') {
-    construct = 'const';
-  } else if (mode === 'enum') {
-    construct = 'enum';
-  } else if (mode === 'adapt') {
-    construct = 'const';
-    // Upgrade version if needed
-    const oldVersion = getOpenApiVersion(doc);
-    upgradeToOas31(doc);
-    const newVersion = getOpenApiVersion(doc);
-    if (oldVersion !== newVersion) {
-      result.versionUpgraded = true;
-    }
-  }
+  const placement: ConstPlacement = opts.placement ?? 'oneOf-branches';
+  const compatibilityMode = opts.compatibilityMode ?? false;
+  const construct = resolveConstruct(doc as Record<string, unknown>, mode, result);
 
   // Process schemas with oneOf + discriminator.mapping
-  for (const [schemaName, schema] of Object.entries(schemas)) {
+  for (const [, schema] of Object.entries(schemas)) {
     if (!isValidObject(schema)) continue;
-    
+
     // Only target schemas with oneOf + discriminator.mapping
     if (!Array.isArray(schema.oneOf) || !isValidObject(schema.discriminator)) continue;
 
@@ -192,33 +127,19 @@ export function addDiscriminatorConst(
     
     if (!propertyName || !isValidObject(mapping)) continue;
 
-    let schemaUpdated = false;
+    const ctx = createDiscriminatorContext(
+      schemas,
+      schema,
+      propertyName,
+      mapping,
+      construct,
+      compatibilityMode,
+      result
+    );
 
-    // For each mapped child, add constraint if not already present
-    for (const [discriminatorValue, ref] of Object.entries(mapping)) {
-      const childName = refToName(ref);
-      if (!childName) continue;
-
-      const childSchema = schemas[childName];
-      if (!isValidObject(childSchema)) continue;
-
-      // Skip if already has the constraint
-      if (hasConstOrEnumConstraint(childSchema, propertyName, discriminatorValue)) {
-        continue;
-      }
-
-      // Add constraint to child's allOf
-      if (!Array.isArray(childSchema.allOf)) {
-        childSchema.allOf = [];
-      }
-
-      const allOf = childSchema.allOf as unknown[];
-      const constraint = createConstConstraint(propertyName, discriminatorValue, construct);
-      allOf.push(constraint);
-
-      schemaUpdated = true;
-      result.constAdded++;
-    }
+    const schemaUpdated = placement === 'children'
+      ? addConstraintsToChildren(ctx)
+      : addConstraintsToOneOfBranches(ctx);
 
     if (schemaUpdated) {
       result.schemasUpdated++;

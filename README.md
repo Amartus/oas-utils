@@ -74,7 +74,7 @@ Convert allOf + discriminator patterns to oneOf + discriminator. This is useful 
 Specifically, it:
 1. Identifies base schemas with discriminators
 2. Finds concrete schemas that extend the base via allOf
-3. Optionally adds a const property to each concrete schema matching its discriminator value (enabled by default)
+3. Optionally adds discriminator constraints (enabled by default)
 4. Creates a new oneOf wrapper schema containing all concrete types
 5. Replaces references to the base schema with the wrapper schema (outside of allOf composition contexts)
 6. Removes discriminators from base schemas that received wrappers
@@ -82,8 +82,15 @@ Specifically, it:
 
 ```
 oas-utils allof-to-oneof <input.yaml> -o output.yaml
-# Optionally skip adding const to specialization schemas
+# Optionally skip adding discriminator constraints
 oas-utils allof-to-oneof <input.yaml> -o output.yaml --no-add-discriminator-const
+# Optionally skip adding constraints for pre-existing oneOf+discriminator schemas
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --no-add-discriminator-const-to-existing-oneof
+# Select where constraints are injected
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --discriminator-const-placement oneOf-branches
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --discriminator-const-placement children
+# In children placement, skip allOf parents in mapped inheritance chains
+oas-utils allof-to-oneof <input.yaml> -o output.yaml --discriminator-const-compatibility-mode
 # Optionally skip transformation if only one specialization is found
 oas-utils allof-to-oneof <input.yaml> -o output.yaml --ignore-single-specialization
 # Optionally merge nested oneOf schemas
@@ -92,16 +99,54 @@ oas-utils allof-to-oneof <input.yaml> -o output.yaml --merge-nested-oneof
 
 Options:
 - -o, --output: write result to this file (defaults to stdout).
-- --no-add-discriminator-const: do not add const property with discriminator value to specialization schemas.
+- --no-add-discriminator-const: do not add discriminator constraints.
+- --no-add-discriminator-const-to-existing-oneof: do not add discriminator constraints for pre-existing `oneOf + discriminator` schemas.
+- --discriminator-const-placement: where discriminator constraints are injected:
+  - `oneOf-branches` (default): wraps each oneOf branch as `allOf: [$ref, constraint]`.
+  - `children` (legacy): injects constraints directly into mapped child schemas.
+- --discriminator-const-compatibility-mode: only relevant for `children` placement; skips allOf parent schemas if another mapped schema extends them.
 - --ignore-single-specialization: skip oneOf transformation if only one specialization is found (useful for bases with only one concrete implementation).
 - --merge-nested-oneof: merge nested oneOf schemas by inlining references to schemas that only contain oneOf.
 
-Example transformation (with addDiscriminatorConst enabled, the default):
+Example transformation (with addDiscriminatorConst enabled, default placement `oneOf-branches`):
 - Base schema `Animal` with discriminator `type` and mapping `{Cat: ..., Dog: ...}`
 - Concrete schemas `Cat` and `Dog` with `allOf: [{$ref: Animal}, {...}]`
 - Creates `AnimalPolymorphic` with `oneOf: [Cat, Dog]` and the same discriminator
-- Adds `type: {const: "Cat"}` to Cat's properties and `type: {const: "Dog"}` to Dog's properties
+- Adds branch constraints such as:
+  - `allOf: [{$ref: Cat}, {properties: {type: {const: "Cat"}}}]`
+  - `allOf: [{$ref: Dog}, {properties: {type: {const: "Dog"}}}]`
 - Replaces references to `Animal` with `AnimalPolymorphic` in array items and other polymorphic contexts
+
+Branch placement is the default because it keeps discriminator narrowing local to the union branch and avoids parent/child conflicts in inheritance chains (especially when followed by `seal-schema`).
+
+Legacy mode is still available via `--discriminator-const-placement children`. Combine it with `--discriminator-const-compatibility-mode` to skip mapped allOf parents and preserve historical behavior in mixed parent/child mappings.
+
+### add-discriminator-const
+
+Add discriminator constraints from discriminator mappings without running the full allOf-to-oneOf transformation.
+
+This command supports the same placement strategies:
+- `oneOf-branches` (default): constraints are attached to oneOf branches.
+- `children` (legacy): constraints are attached directly to mapped child schemas.
+
+```
+oas-utils add-discriminator-const <input.yaml> -o output.yaml
+# Force legacy placement
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --placement children
+# In legacy placement, skip allOf parents in mapped inheritance chains
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --placement children --compatibility-mode
+# Select keyword strategy
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --mode auto
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --mode const
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --mode enum
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --mode adapt
+```
+
+Options:
+- -o, --output: write result to this file (defaults to stdout).
+- --mode: discriminator keyword mode (`auto`, `const`, `enum`, `adapt`).
+- --placement: placement strategy (`oneOf-branches` default, `children` legacy).
+- --compatibility-mode: only applies to `children` placement; skips mapped allOf parent schemas when a mapped child extends them.
 
 ### cleanup-discriminators
 
@@ -277,7 +322,16 @@ decorators:
   # Convert allOf + discriminator to oneOf + discriminator
   oas-utils/allof-to-oneof:
     addDiscriminatorConst: true
+    addDiscriminatorConstToExistingOneOf: true
+    discriminatorConstPlacement: oneOf-branches
+    discriminatorConstCompatibilityMode: true
     ignoreSingleSpecialization: false
+
+  # Add discriminator constraints (standalone)
+  oas-utils/add-discriminator-const:
+    mode: auto
+    placement: oneOf-branches
+    compatibilityMode: false
 
   # Clean up discriminator mappings
   oas-utils/cleanup-discriminators:
@@ -309,6 +363,7 @@ Notes:
 
 ```
 import {
+  addDiscriminatorConst,
   cleanupDiscriminatorMappings,
   removeDanglingRefs,
   removeSingleComposition,
@@ -321,7 +376,19 @@ import {
 removeUnusedSchemas(doc, { keep: ['CommonError'], aggressive: true });
 
 // Convert allOf + discriminator to oneOf + discriminator
-allOfToOneOf(doc, { addDiscriminatorConst: true, mergeNestedOneOf: false });
+allOfToOneOf(doc, {
+  addDiscriminatorConst: true,
+  addDiscriminatorConstToExistingOneOf: true,
+  discriminatorConstPlacement: 'oneOf-branches',
+  discriminatorConstCompatibilityMode: true,
+  mergeNestedOneOf: false,
+});
+
+// Add discriminator constraints without running allOf-to-oneOf
+addDiscriminatorConst(doc, {
+  mode: 'auto',
+  placement: 'oneOf-branches',
+});
 
 // Clean up discriminator mappings
 const result = cleanupDiscriminatorMappings(doc);

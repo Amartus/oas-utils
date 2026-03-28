@@ -15,7 +15,7 @@ import { removeDanglingRefs } from "./removeDanglingRefs.js";
 import { removeSingleComposition } from "./removeSingleComposition.js";
 import { createKeepPredicate } from "./patternMatching.js";
 import { inlineSchema, batchInlineSchemas, InlineSchemaOptions } from "./inlineSchema.js";
-import { addDiscriminatorConst, AddDiscriminatorConstOptions, ConstMode } from "./addDiscriminatorConst.js";
+import { addDiscriminatorConst, AddDiscriminatorConstOptions, ConstMode, ConstPlacement } from "./addDiscriminatorConst.js";
 
 function parseYamlOrJson(data: any): any {
   // Accept pre-parsed objects (useful in tests)
@@ -181,7 +181,16 @@ export async function optimizeAllOf(
  * @param reader - Function to read input
  */
 export async function runAllOfToOneOf(
-  opts: { output?: string; addDiscriminatorConst?: boolean; ignoreSingleSpecialization?: boolean; mergeNestedOneof?: boolean },
+  opts: {
+    output?: string;
+    addDiscriminatorConst?: boolean;
+    addDiscriminatorConstToExistingOneOf?: boolean;
+    addDiscriminatorConstToExistingOneof?: boolean;
+    discriminatorConstCompatibilityMode?: boolean;
+    discriminatorConstPlacement?: ConstPlacement;
+    ignoreSingleSpecialization?: boolean;
+    mergeNestedOneof?: boolean;
+  },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -192,6 +201,10 @@ export async function runAllOfToOneOf(
   const beforeSchemas = Object.keys(doc.components.schemas);
   const topts: AllOfToOneOfOptions = {
     addDiscriminatorConst: opts.addDiscriminatorConst !== false,
+    addDiscriminatorConstToExistingOneOf:
+      (opts.addDiscriminatorConstToExistingOneOf ?? opts.addDiscriminatorConstToExistingOneof) !== false,
+    discriminatorConstCompatibilityMode: opts.discriminatorConstCompatibilityMode !== false,
+    discriminatorConstPlacement: opts.discriminatorConstPlacement || 'oneOf-branches',
     ignoreSingleSpecialization: Boolean(opts.ignoreSingleSpecialization),
     mergeNestedOneOf: Boolean(opts.mergeNestedOneof),
     onWarning: (msg) => console.warn(`[WARN] ${msg}`),
@@ -411,7 +424,7 @@ export async function runInlineSchema(
  * @param reader - Function to read input
  */
 export async function runAddDiscriminatorConst(
-  opts: { mode?: ConstMode; output?: string },
+  opts: { mode?: ConstMode; placement?: ConstPlacement; compatibilityMode?: boolean; output?: string },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -421,6 +434,8 @@ export async function runAddDiscriminatorConst(
 
   const result = addDiscriminatorConst(doc, {
     mode: opts.mode || 'auto',
+    placement: opts.placement || 'oneOf-branches',
+    compatibilityMode: opts.compatibilityMode,
   });
 
   if (result.schemasUpdated > 0) {

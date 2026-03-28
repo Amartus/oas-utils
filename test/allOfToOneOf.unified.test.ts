@@ -167,7 +167,13 @@ const implementations: Array<{ name: string; transform: AllOfToOneOfTransform }>
 describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, transform }) => {
 
   describe("file-based tests", () => {
-    const cases = ["foo-fvo-res", "merge-nested-oneof", "nested-oneof-discriminators", "nested-oneof-discriminators-sametypedisc"];
+    const cases = [
+      "foo-fvo-res",
+      "merge-nested-oneof",
+      "nested-oneof-discriminators",
+      "nested-oneof-discriminators-sametypedisc",
+      "existing-oneof-discriminator-const-compat",
+    ];
 
     for (const testCase of cases) {
       it(`${testCase} - matches expected output`, async () => {
@@ -326,6 +332,63 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     expect(result.components.schemas.Dog.allOf.find((item: any) => item.properties?.type?.const === "Dog")).toBeDefined();
     expect(result.components.schemas.Human.properties.pets.items.$ref).toBe("#/components/schemas/AnimalPolymorphic");
     expect(result.components.schemas.Animal.discriminator).toBeUndefined();
+  });
+
+  it("adds discriminator consts correctly for A/B/C allOf hierarchy", () => {
+    const doc: any = createDoc({
+      openapi: "3.0.0",
+      paths: jsonResponsePath("/a", "A", "Returns A polymorphic"),
+      schemas: {
+        A: discriminatorSchema("@type", { A: "A", B: "B", C: "C" }, {
+          properties: {
+            "@type": { type: "string" },
+            id: { type: "string" },
+          },
+        }),
+        B: allOfChild("A", { bProp: { type: "string" } }),
+        C: allOfChild("A", { cProp: { type: "string" } }),
+      },
+    });
+
+    const result = transform(deepClone(doc), {
+      addDiscriminatorConst: true,
+      addDiscriminatorConstToExistingOneOf: true,
+    });
+
+    // Wrapper should be generated because A is referenced from paths
+    expect(result.components.schemas.APolymorphic).toBeDefined();
+    expect(result.components.schemas.AOneOf).toBeDefined();
+
+    // Parent discriminator is removed after transformation
+    expect(result.components.schemas.A.discriminator).toBeUndefined();
+
+    // A self-mapping should be redirected to AOneOf and carry const there
+    const aMappingRef = result.components.schemas.APolymorphic.discriminator.mapping.A;
+    expect(aMappingRef).toBe("#/components/schemas/AOneOf");
+    const aOneOfConst = result.components.schemas.AOneOf.allOf.find(
+      (item: any) => item?.properties?.["@type"]?.const === "A"
+    );
+    expect(aOneOfConst).toBeDefined();
+
+    // Specializations should have consts inline
+    const bConst = result.components.schemas.B.allOf.find(
+      (item: any) => item?.properties?.["@type"]?.const === "B"
+    );
+    const cConst = result.components.schemas.C.allOf.find(
+      (item: any) => item?.properties?.["@type"]?.const === "C"
+    );
+    expect(bConst).toBeDefined();
+    expect(cConst).toBeDefined();
+
+    // If any Core variant exists (e.g. from future composition steps),
+    // keep this assertion resilient and verify no duplicate A const is added there.
+    if (result.components.schemas.ACore) {
+      const aCoreAllOf = result.components.schemas.ACore.allOf;
+      const aCoreHasAConst = Array.isArray(aCoreAllOf)
+        ? aCoreAllOf.some((item: any) => item?.properties?.["@type"]?.const === "A")
+        : false;
+      expect(aCoreHasAConst).toBe(false);
+    }
   });
 
   it("converts vehicle hierarchy with commercial vehicle references", () => {
@@ -494,6 +557,87 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     const catAllOf = result.components.schemas.Cat.allOf;
     const catInline = catAllOf?.find((item: any) => item.properties && item.properties.type);
     expect(catInline).toBeUndefined();
+  });
+
+  it("adds consts for pre-existing oneOf discriminator schemas (compatibility mode on)", () => {
+    const doc: any = createDoc({
+      schemas: {
+        EntityRef: objectSchema({ id: { type: "string" } }),
+        PlaceRef: allOfChild("EntityRef"),
+        PlaceRef_Ext: allOfChild("PlaceRef", { geographicSubAddress: { type: "array" } }),
+        PlaceRefOrValue: {
+          type: "object",
+          oneOf: oneOfRefs("PlaceRef", "PlaceRef_Ext"),
+          discriminator: {
+            propertyName: "@type",
+            mapping: {
+              PlaceRef: ref("PlaceRef"),
+              PlaceRef_Ext: ref("PlaceRef_Ext"),
+            },
+          },
+        },
+      },
+    });
+
+    const result = transform(deepClone(doc), {
+      addDiscriminatorConst: true,
+      addDiscriminatorConstToExistingOneOf: true,
+    });
+
+    const branchForPlaceRef = result.components.schemas.PlaceRefOrValue.oneOf.find((entry: any) =>
+      Array.isArray(entry?.allOf) && entry.allOf.some((item: any) => item?.$ref === ref("PlaceRef"))
+    );
+    const branchForPlaceRefExt = result.components.schemas.PlaceRefOrValue.oneOf.find((entry: any) =>
+      Array.isArray(entry?.allOf) && entry.allOf.some((item: any) => item?.$ref === ref("PlaceRef_Ext"))
+    );
+
+    const placeRefBranchConst = branchForPlaceRef?.allOf?.some(
+      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef"
+    );
+    const placeRefExtBranchConst = branchForPlaceRefExt?.allOf?.some(
+      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef_Ext"
+    );
+
+    expect(placeRefBranchConst).toBe(true);
+    expect(placeRefExtBranchConst).toBe(true);
+  });
+
+  it("adds consts to both mapped schemas when compatibility mode is disabled", () => {
+    const doc: any = createDoc({
+      schemas: {
+        EntityRef: objectSchema({ id: { type: "string" } }),
+        PlaceRef: allOfChild("EntityRef"),
+        PlaceRef_Ext: allOfChild("PlaceRef", { geographicSubAddress: { type: "array" } }),
+        PlaceRefOrValue: {
+          type: "object",
+          oneOf: oneOfRefs("PlaceRef", "PlaceRef_Ext"),
+          discriminator: {
+            propertyName: "@type",
+            mapping: {
+              PlaceRef: ref("PlaceRef"),
+              PlaceRef_Ext: ref("PlaceRef_Ext"),
+            },
+          },
+        },
+      },
+    });
+
+    const result = transform(deepClone(doc), {
+      addDiscriminatorConst: true,
+      addDiscriminatorConstToExistingOneOf: true,
+      discriminatorConstPlacement: "children",
+      discriminatorConstCompatibilityMode: false,
+    });
+
+    const placeRefHasConst = result.components.schemas.PlaceRef.allOf.some(
+      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef"
+    );
+    const placeRefExtHasConst = result.components.schemas.PlaceRef_Ext.allOf.some(
+      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef_Ext"
+    );
+
+    expect(placeRefHasConst).toBe(true);
+    expect(placeRefExtHasConst).toBe(true);
   });
 
   it("replaces references in properties nested inside allOf composition items", () => {
