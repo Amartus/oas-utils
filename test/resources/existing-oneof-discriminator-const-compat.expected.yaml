@@ -46,13 +46,15 @@ components:
             - type: object
               properties:
                 "@type":
-                  const: AnimalRef
+                  enum:
+                    - AnimalRef
         - allOf:
             - $ref: "#/components/schemas/AnimalRefExt"
             - type: object
               properties:
                 "@type":
-                  const: AnimalRefExt
+                  enum:
+                    - AnimalRefExt
       discriminator:
         propertyName: "@type"
         mapping:

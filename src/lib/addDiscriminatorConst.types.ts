@@ -6,15 +6,26 @@ export type ConstMode = 'auto' | 'const' | 'enum' | 'adapt';
 
 export type ConstPlacement = 'oneOf-branches' | 'children';
 
+export interface DiscriminatorMappingTarget {
+  ref: string;
+  values: string[];
+}
+
 export interface AddDiscriminatorConstOptions {
   /**
    * Mode for selecting the constraint construct.
-   * - 'auto' (default): OAS 3.0.x -> const, OAS 3.1.x -> enum
-   * - 'const': always use { const: value }
+   * - 'auto' (default): OAS 3.0.x -> enum, OAS 3.1.x -> const
+   * - 'const': use { const: value } on OAS 3.1.x, otherwise fall back to enum
    * - 'enum': always use { enum: [value] }
    * - 'adapt': use const and upgrade OAS 3.0.x -> 3.1.0
    */
   mode?: ConstMode;
+
+  /**
+   * Force-upgrade the document to OAS 3.1.0 before constraint generation.
+   * Useful when `mode='auto'` or `mode='const'` should emit `const` for OAS 3.0.x inputs.
+   */
+  forceUplift?: boolean;
 
   /**
    * Where discriminator constraints are injected.
@@ -49,6 +60,7 @@ export interface DiscriminatorContext {
   schema: Record<string, unknown>;
   propertyName: string;
   mapping: Record<string, string>;
+  mappingTargets: DiscriminatorMappingTarget[];
   construct: Construct;
   compatibilityMode: boolean;
   result: AddDiscriminatorConstResult;

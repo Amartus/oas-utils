@@ -46,21 +46,23 @@ export function createDoc(opts: {
   return doc;
 }
 
-export function constraintFragment(propName: string, value: string, kind: "const" | "enum"): any {
+export function constraintFragment(propName: string, value: string | string[], kind: "const" | "enum"): any {
+  const values = Array.isArray(value) ? value : [value];
   return {
     type: "object",
     properties: {
-      [propName]: kind === "const" ? { const: value } : { enum: [value] },
+      [propName]: kind === "const" ? { const: values[0] } : { enum: values },
     },
   };
 }
 
-export function hasConstraint(schema: any, propName: string, value: string, kind: "const" | "enum"): boolean {
+export function hasConstraint(schema: any, propName: string, value: string | string[], kind: "const" | "enum"): boolean {
+  const values = Array.isArray(value) ? value : [value];
   if (!Array.isArray(schema?.allOf)) return false;
   return schema.allOf.some((item: any) =>
     kind === "const"
-      ? item?.properties?.[propName]?.const === value
-      : Array.isArray(item?.properties?.[propName]?.enum) && item.properties[propName].enum.includes(value)
+      ? values.length === 1 && item?.properties?.[propName]?.const === values[0]
+      : Array.isArray(item?.properties?.[propName]?.enum) && values.every((entry) => item.properties[propName].enum.includes(entry))
   );
 }
 

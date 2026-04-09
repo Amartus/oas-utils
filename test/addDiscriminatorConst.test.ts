@@ -8,13 +8,73 @@ import {
   ref,
 } from "./testBuilders.js";
 
+type ConstraintKind = "const" | "enum";
+type ConstraintValue = string | string[];
+
+function buildDoc(
+  parentName: string,
+  propertyName: string,
+  mapping: Record<string, string>,
+  schemas: Record<string, any> = {},
+  openapi = "3.1.0"
+): any {
+  const builder = new TestDocBuilder()
+    .withOpenApi(openapi)
+    .withParent(parentName, propertyName, mapping);
+
+  for (const [name, schema] of Object.entries(schemas)) {
+    builder.withSchema(name, schema);
+  }
+
+  return builder.build();
+}
+
+function buildMappedHierarchyDoc(includeLeafOnly = false): any {
+  const mapping: Record<string, string> = includeLeafOnly
+    ? { A: "A", B: "B" }
+    : { A: "A", B: "B", C: "C" };
+
+  return buildDoc("A", "@type", mapping, {
+    B: includeLeafOnly
+      ? objectSchema({ b: { type: "string" } })
+      : {
+          allOf: [
+            { $ref: ref("A") },
+            objectSchema({ b: { type: "string" } }),
+          ],
+        },
+    ...(includeLeafOnly
+      ? {}
+      : {
+          C: {
+            allOf: [
+              { $ref: ref("A") },
+              objectSchema({ c: { type: "string" } }),
+            ],
+          },
+        }),
+  });
+}
+
+const expectSchemaConstraint = (
+  doc: any,
+  schemaName: string,
+  propName: string,
+  value: ConstraintValue,
+  kind: ConstraintKind,
+  present = true
+): void => {
+  expect(hasConstraint(doc.components.schemas[schemaName], propName, value, kind)).toBe(present);
+};
+
 function hasOneOfBranchConstraint(
   schema: any,
   targetRef: string,
   propName: string,
-  value: string,
-  kind: "const" | "enum"
+  value: ConstraintValue,
+  kind: ConstraintKind
 ): boolean {
+  const values = Array.isArray(value) ? value : [value];
   if (!Array.isArray(schema?.oneOf)) return false;
 
   return schema.oneOf.some((entry: any) => {
@@ -23,8 +83,8 @@ function hasOneOfBranchConstraint(
     if (!hasRef) return false;
     return entry.allOf.some((item: any) =>
       kind === "const"
-        ? item?.properties?.[propName]?.const === value
-        : Array.isArray(item?.properties?.[propName]?.enum) && item.properties[propName].enum.includes(value)
+        ? values.length === 1 && item?.properties?.[propName]?.const === values[0]
+        : Array.isArray(item?.properties?.[propName]?.enum) && values.every((entryValue) => item.properties[propName].enum.includes(entryValue))
     );
   });
 }
@@ -32,21 +92,19 @@ function hasOneOfBranchConstraint(
 describe("addDiscriminatorConst", () => {
   describe("main function - default placement", () => {
     it("adds const constraints to oneOf branches by default", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("AnimalOrRef", "@type", { AnimalRef: "AnimalRef", AnimalRefExt: "AnimalRefExt" })
-        .withSchema("AnimalRef", {
+      const doc = buildDoc("AnimalOrRef", "@type", { AnimalRef: "AnimalRef", AnimalRefExt: "AnimalRefExt" }, {
+        AnimalRef: {
           type: "object",
           allOf: [{ $ref: ref("EntityRef") }],
-        })
-        .withSchema("EntityRef", objectSchema({ id: { type: "string" } }))
-        .withSchema("AnimalRefExt", {
+        },
+        EntityRef: objectSchema({ id: { type: "string" } }),
+        AnimalRefExt: {
           allOf: [
             { $ref: ref("AnimalRef") },
             objectSchema({ trackingCode: { type: "string" } }),
           ],
-        })
-        .build();
+        },
+      });
 
       const result = addDiscriminatorConst(doc, { mode: "const" });
 
@@ -54,8 +112,8 @@ describe("addDiscriminatorConst", () => {
       expect(result.constAdded).toBe(2);
       expect(hasOneOfBranchConstraint(doc.components.schemas.AnimalOrRef, "AnimalRef", "@type", "AnimalRef", "const")).toBe(true);
       expect(hasOneOfBranchConstraint(doc.components.schemas.AnimalOrRef, "AnimalRefExt", "@type", "AnimalRefExt", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.AnimalRef, "@type", "AnimalRef", "const")).toBe(false);
-      expect(hasConstraint(doc.components.schemas.AnimalRefExt, "@type", "AnimalRefExt", "const")).toBe(false);
+      expectSchemaConstraint(doc, "AnimalRef", "@type", "AnimalRef", "const", false);
+      expectSchemaConstraint(doc, "AnimalRefExt", "@type", "AnimalRefExt", "const", false);
     });
   });
 
@@ -76,6 +134,16 @@ describe("addDiscriminatorConst", () => {
         type: "object",
         properties: {
           type: { enum: ["dog"] }
+        }
+      });
+    });
+
+    it("creates multi-value enum constraint in const mode", () => {
+      const constraint = createConstConstraint("type", ["cat", "feline"], "const");
+      expect(constraint).toEqual({
+        type: "object",
+        properties: {
+          type: { enum: ["cat", "feline"] }
         }
       });
     });
@@ -110,6 +178,20 @@ describe("addDiscriminatorConst", () => {
       expect(hasConstOrEnumConstraint(schema, "type", "dog")).toBe(true);
     });
 
+    it("detects multi-value enum constraint", () => {
+      const schema: any = {
+        allOf: [
+          {
+            type: "object",
+            properties: {
+              type: { enum: ["cat", "feline"] }
+            }
+          }
+        ]
+      };
+      expect(hasConstOrEnumConstraint(schema, "type", ["cat", "feline"])).toBe(true);
+    });
+
     it("returns false when no constraint present", () => {
       const schema: any = {
         type: "object",
@@ -135,103 +217,93 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - const mode", () => {
     it("adds const constraint to oneOf children", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("Animal", "type", { cat: "Cat", dog: "Dog" })
-        .withSchema("Cat", objectSchema({ name: { type: "string" } }))
-        .withSchema("Dog", objectSchema({ breed: { type: "string" } }))
-        .build();
+      const doc = buildDoc("Animal", "type", { cat: "Cat", dog: "Dog" }, {
+        Cat: objectSchema({ name: { type: "string" } }),
+        Dog: objectSchema({ breed: { type: "string" } }),
+      });
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
       expect(result.versionUpgraded).toBe(false);
-
-      // Cat should have const constraint
-      const catSchema = doc.components.schemas.Cat;
-      expect(Array.isArray(catSchema.allOf)).toBe(true);
-      expect(hasConstraint(catSchema, "type", "cat", "const")).toBe(true);
-
-      // Dog should have const constraint
-      const dogSchema = doc.components.schemas.Dog;
-      expect(Array.isArray(dogSchema.allOf)).toBe(true);
-      expect(hasConstraint(dogSchema, "type", "dog", "const")).toBe(true);
+      expect(Array.isArray(doc.components.schemas.Cat.allOf)).toBe(true);
+      expect(Array.isArray(doc.components.schemas.Dog.allOf)).toBe(true);
+      expectSchemaConstraint(doc, "Cat", "type", "cat", "const");
+      expectSchemaConstraint(doc, "Dog", "type", "dog", "const");
     });
   });
 
   describe("main function - enum mode", () => {
     it("adds enum constraint to oneOf children", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.1.0")
-        .withParent("Vehicle", "vehicleType", { car: "Car", truck: "Truck" })
-        .withSchema("Car", objectSchema({ doors: { type: "integer" } }))
-        .withSchema("Truck", objectSchema({ capacity: { type: "number" } }))
-        .build();
+      const doc = buildDoc("Vehicle", "vehicleType", { car: "Car", truck: "Truck" }, {
+        Car: objectSchema({ doors: { type: "integer" } }),
+        Truck: objectSchema({ capacity: { type: "number" } }),
+      });
 
       const result = addDiscriminatorConst(doc, { mode: "enum", placement: "children" });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
-
-      // Car should have enum constraint
-      const carSchema = doc.components.schemas.Car;
-      expect(hasConstraint(carSchema, "vehicleType", "car", "enum")).toBe(true);
+      expectSchemaConstraint(doc, "Car", "vehicleType", "car", "enum");
     });
   });
 
   describe("main function - auto mode", () => {
-    it("uses const for OAS 3.0.x documents", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("Pet", "petType", { cat: "Cat" })
-        .withSchema("Cat")
-        .build();
+    it("uses enum for OAS 3.0.x documents", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat" }, { Cat: undefined }, "3.0.0");
 
       const result = addDiscriminatorConst(doc, { mode: "auto", placement: "children" });
 
       expect(result.constAdded).toBe(1);
-      const catSchema = doc.components.schemas.Cat;
-      expect(hasConstraint(catSchema, "petType", "cat", "const")).toBe(true);
+      expectSchemaConstraint(doc, "Cat", "petType", "cat", "enum");
     });
 
-    it("uses enum for OAS 3.1.x documents", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.1.0")
-        .withParent("Pet", "petType", { dog: "Dog" })
-        .withSchema("Dog")
-        .build();
+    it("uses const for OAS 3.1.x documents", () => {
+      const doc = buildDoc("Pet", "petType", { dog: "Dog" }, { Dog: undefined });
 
       const result = addDiscriminatorConst(doc, { mode: "auto", placement: "children" });
 
       expect(result.constAdded).toBe(1);
-      const dogSchema = doc.components.schemas.Dog;
-      expect(hasConstraint(dogSchema, "petType", "dog", "enum")).toBe(true);
+      expectSchemaConstraint(doc, "Dog", "petType", "dog", "const");
+    });
+  });
+
+  describe("main function - force uplift", () => {
+    it("upgrades OAS 3.0.x and emits const in const mode", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat" }, { Cat: undefined }, "3.0.0");
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children", forceUplift: true });
+
+      expect(result.versionUpgraded).toBe(true);
+      expect(doc.openapi).toBe("3.1.0");
+      expectSchemaConstraint(doc, "Cat", "petType", "cat", "const");
+    });
+
+    it("falls back to enum in const mode on OAS 3.0.x without uplift", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat" }, { Cat: undefined }, "3.0.0");
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      expect(result.versionUpgraded).toBe(false);
+      expectSchemaConstraint(doc, "Cat", "petType", "cat", "enum");
     });
   });
 
   describe("main function - adapt mode", () => {
     it("uses const and upgrades OAS 3.0.x to 3.1.0", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("Shape", "shapeType", { circle: "Circle" })
-        .withSchema("Circle")
-        .build();
+      const doc = buildDoc("Shape", "shapeType", { circle: "Circle" }, { Circle: undefined }, "3.0.0");
 
       const result = addDiscriminatorConst(doc, { mode: "adapt", placement: "children" });
 
       expect(result.versionUpgraded).toBe(true);
       expect(doc.openapi).toBe("3.1.0");
       expect(result.constAdded).toBe(1);
-      expect(hasConstraint(doc.components.schemas.Circle, "shapeType", "circle", "const")).toBe(true);
+      expectSchemaConstraint(doc, "Circle", "shapeType", "circle", "const");
     });
 
     it("does not upgrade OAS if already 3.1.0", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.1.0")
-        .withParent("Shape", "shapeType", { square: "Square" })
-        .withSchema("Square")
-        .build();
+      const doc = buildDoc("Shape", "shapeType", { square: "Square" }, { Square: undefined });
 
       const result = addDiscriminatorConst(doc, { mode: "adapt", placement: "children" });
 
@@ -242,15 +314,13 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - partial constraints", () => {
     it("only updates children without existing constraints", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("Status", "status", { active: "Active", inactive: "Inactive" })
-        .withSchema("Active", {
+      const doc = buildDoc("Status", "status", { active: "Active", inactive: "Inactive" }, {
+        Active: {
           ...objectSchema(),
           allOf: [constraintFragment("status", "active", "const")],
-        })
-        .withSchema("Inactive", objectSchema())
-        .build();
+        },
+        Inactive: objectSchema(),
+      });
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
@@ -262,7 +332,7 @@ describe("addDiscriminatorConst", () => {
 
       // Inactive should now have allOf with the constraint
       expect(doc.components.schemas.Inactive.allOf.length).toBe(1);
-      expect(hasConstraint(doc.components.schemas.Inactive, "status", "inactive", "const")).toBe(true);
+      expectSchemaConstraint(doc, "Inactive", "status", "inactive", "const");
     });
   });
 
@@ -319,14 +389,12 @@ describe("addDiscriminatorConst", () => {
     });
 
     it("returns zero when all children already have constraints", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withParent("Animal", "type", { cat: "Cat" })
-        .withSchema("Cat", {
+      const doc = buildDoc("Animal", "type", { cat: "Cat" }, {
+        Cat: {
           ...objectSchema(),
           allOf: [constraintFragment("type", "cat", "const")],
-        })
-        .build();
+        },
+      });
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
@@ -337,8 +405,8 @@ describe("addDiscriminatorConst", () => {
 
   describe("main function - edge cases", () => {
     it("handles multiple schemas with discriminators", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
+      const doc = new TestDocBuilder()
+        .withOpenApi("3.1.0")
         .withParent("Animal", "animalType", { cat: "Cat" })
         .withSchema("Cat")
         .withParent("Vehicle", "vehicleType", { car: "Car" })
@@ -349,9 +417,8 @@ describe("addDiscriminatorConst", () => {
 
       expect(result.schemasUpdated).toBe(2);
       expect(result.constAdded).toBe(2);
-
-      expect(hasConstraint(doc.components.schemas.Cat, "animalType", "cat", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.Car, "vehicleType", "car", "const")).toBe(true);
+      expectSchemaConstraint(doc, "Cat", "animalType", "cat", "const");
+      expectSchemaConstraint(doc, "Car", "vehicleType", "car", "const");
     });
 
     it("handles invalid refs gracefully", () => {
@@ -377,112 +444,72 @@ describe("addDiscriminatorConst", () => {
     });
 
     it("keeps default behavior when compatibility mode is disabled", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withSchema("A", {
-          oneOf: [
-            { $ref: ref("A") },
-            { $ref: ref("B") },
-            { $ref: ref("C") },
-          ],
-          discriminator: {
-            propertyName: "@type",
-            mapping: {
-              A: ref("A"),
-              B: ref("B"),
-              C: ref("C"),
-            },
-          },
-        })
-        .withSchema("B", {
-          allOf: [
-            { $ref: ref("A") },
-            objectSchema({ b: { type: "string" } }),
-          ],
-        })
-        .withSchema("C", {
-          allOf: [
-            { $ref: ref("A") },
-            objectSchema({ c: { type: "string" } }),
-          ],
-        })
-        .build();
+      const doc = buildMappedHierarchyDoc();
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(3);
-      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.C, "@type", "C", "const")).toBe(true);
+      expectSchemaConstraint(doc, "A", "@type", "A", "const");
+      expectSchemaConstraint(doc, "B", "@type", "B", "const");
+      expectSchemaConstraint(doc, "C", "@type", "C", "const");
     });
 
     it("skips mapped allOf parent schemas in compatibility mode", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withSchema("A", {
-          oneOf: [
-            { $ref: ref("A") },
-            { $ref: ref("B") },
-            { $ref: ref("C") },
-          ],
-          discriminator: {
-            propertyName: "@type",
-            mapping: {
-              A: ref("A"),
-              B: ref("B"),
-              C: ref("C"),
-            },
-          },
-        })
-        .withSchema("B", {
-          allOf: [
-            { $ref: ref("A") },
-            objectSchema({ b: { type: "string" } }),
-          ],
-        })
-        .withSchema("C", {
-          allOf: [
-            { $ref: ref("A") },
-            objectSchema({ c: { type: "string" } }),
-          ],
-        })
-        .build();
+      const doc = buildMappedHierarchyDoc();
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children", compatibilityMode: true });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
-      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(false);
-      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.C, "@type", "C", "const")).toBe(true);
+      expectSchemaConstraint(doc, "A", "@type", "A", "const", false);
+      expectSchemaConstraint(doc, "B", "@type", "B", "const");
+      expectSchemaConstraint(doc, "C", "@type", "C", "const");
     });
 
     it("does not skip mapped schema when no mapped child composes it", () => {
-      const doc: any = new TestDocBuilder()
-        .withOpenApi("3.0.0")
-        .withSchema("A", {
-          oneOf: [
-            { $ref: ref("A") },
-            { $ref: ref("B") },
-          ],
-          discriminator: {
-            propertyName: "@type",
-            mapping: {
-              A: ref("A"),
-              B: ref("B"),
-            },
-          },
-        })
-        .withSchema("B", objectSchema({ b: { type: "string" } }))
-        .build();
+      const doc = buildMappedHierarchyDoc(true);
 
       const result = addDiscriminatorConst(doc, { mode: "const", placement: "children", compatibilityMode: true });
 
       expect(result.schemasUpdated).toBe(1);
       expect(result.constAdded).toBe(2);
-      expect(hasConstraint(doc.components.schemas.A, "@type", "A", "const")).toBe(true);
-      expect(hasConstraint(doc.components.schemas.B, "@type", "B", "const")).toBe(true);
+      expectSchemaConstraint(doc, "A", "@type", "A", "const");
+      expectSchemaConstraint(doc, "B", "@type", "B", "const");
+    });
+
+    it("uses a consolidated enum for multiple values on the same child schema", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat", feline: "Cat", dog: "Dog" }, { Cat: undefined, Dog: undefined });
+
+      const result = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(2);
+      expectSchemaConstraint(doc, "Cat", "petType", ["cat", "feline"], "enum");
+      expectSchemaConstraint(doc, "Dog", "petType", "dog", "const");
+    });
+
+    it("uses a consolidated enum for multiple values on the same oneOf branch", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat", feline: "Cat", dog: "Dog" }, { Cat: undefined, Dog: undefined });
+
+      const result = addDiscriminatorConst(doc, { mode: "const" });
+
+      expect(result.schemasUpdated).toBe(1);
+      expect(result.constAdded).toBe(2);
+      expect(hasOneOfBranchConstraint(doc.components.schemas.Pet, "Cat", "petType", ["cat", "feline"], "enum")).toBe(true);
+      expect(hasOneOfBranchConstraint(doc.components.schemas.Pet, "Dog", "petType", "dog", "const")).toBe(true);
+    });
+
+    it("is idempotent for grouped discriminator mappings", () => {
+      const doc = buildDoc("Pet", "petType", { cat: "Cat", feline: "Cat" }, { Cat: undefined });
+
+      const first = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+      const second = addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      expect(first.constAdded).toBe(1);
+      expect(second.constAdded).toBe(0);
+      expect(doc.components.schemas.Cat.allOf).toHaveLength(1);
+      expectSchemaConstraint(doc, "Cat", "petType", ["cat", "feline"], "enum");
     });
   });
 });

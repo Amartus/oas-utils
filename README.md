@@ -129,8 +129,139 @@ This command supports the same placement strategies:
 - `oneOf-branches` (default): constraints are attached to oneOf branches.
 - `children` (legacy): constraints are attached directly to mapped child schemas.
 
+Constraint keyword selection:
+- `auto` (default): emits `enum` for OpenAPI 3.0.x and `const` for OpenAPI 3.1.x
+- `const`: emits `const` only when the target document is OpenAPI 3.1.x
+- `enum`: always emits `enum`
+- `adapt`: upgrades the document to OpenAPI 3.1.0 (if needed) and emits `const`
+- `--force-uplift`: upgrades an OpenAPI 3.0.x input to 3.1.0 before applying `auto` or `const`
+
+If multiple discriminator values point to the same schema, `add-discriminator-const` always emits a single multi-value `enum` for that schema or branch, regardless of mode.
+
+#### Placement strategies
+
+Both variants start from the same input shape: a schema with `oneOf` and `discriminator.mapping`, for example a polymorphic parent such as `Animal` that maps discriminator values to `Cat` and `Dog`.
+
+##### `oneOf-branches` (default)
+
+This strategy keeps the mapped child schemas unchanged and injects the discriminator constraint at the parent's `oneOf` level.
+
+For each discriminator mapping entry:
+- if the matching `oneOf` branch is a bare `$ref`, it is rewritten as `allOf: [$ref, constraint]`
+- if the branch already uses `allOf`, the constraint is appended to that `allOf`
+- if the mapping points to a schema that is not present in `oneOf`, a new `allOf: [$ref, constraint]` branch is added
+
+Example result:
+
+```yaml
+Animal:
+  oneOf:
+    - allOf:
+        - $ref: '#/components/schemas/Cat'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              const: Cat
+    - allOf:
+        - $ref: '#/components/schemas/Dog'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              const: Dog
+  discriminator:
+    propertyName: type
+    mapping:
+      Cat: '#/components/schemas/Cat'
+      Dog: '#/components/schemas/Dog'
+```
+
+This is the preferred mode because the discriminator narrowing stays local to the union branches. That avoids mutating shared child schemas and reduces conflicts in inheritance chains or later transforms such as `seal-schema`.
+
+When a schema is targeted by multiple discriminator values, the injected branch constraint is consolidated into a single enum:
+
+```yaml
+Animal:
+  oneOf:
+    - allOf:
+        - $ref: '#/components/schemas/Cat'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              enum: [Cat, Feline]
+```
+
+##### `children` (legacy)
+
+This strategy mutates each mapped child schema directly. The command resolves each mapping `$ref`, finds the child schema under `components.schemas`, creates `allOf` if needed, and appends the discriminator constraint there.
+
+Example result:
+
+```yaml
+Cat:
+  allOf:
+    - $ref: '#/components/schemas/Animal'
+    - type: object
+      properties:
+        whiskers:
+          type: boolean
+    - type: object
+      required: [type]
+      properties:
+        type:
+          const: Cat
+
+Dog:
+  allOf:
+    - $ref: '#/components/schemas/Animal'
+    - type: object
+      properties:
+        barkVolume:
+          type: integer
+    - type: object
+      required: [type]
+      properties:
+        type:
+          const: Dog
+```
+
+This mode exists for compatibility with older workflows that expect discriminator constraints to live on the concrete child schemas themselves. It is more fragile in mixed inheritance hierarchies because a mapped schema may also act as an `allOf` parent for another mapped schema.
+
+The same multi-value rule applies here: if `Cat` is mapped from both `Cat` and `Feline`, the appended child constraint is a single `enum: [Cat, Feline]` fragment.
+
+##### `--compatibility-mode` for `children`
+
+Compatibility mode is only relevant with `--placement children`.
+
+It detects mapped schemas that are referenced as `allOf` parents by other mapped schemas and skips adding discriminator constraints to those parent schemas. This prevents incorrectly constraining intermediate abstract types.
+
+Use it for hierarchies like:
+
+```yaml
+Animal:
+  discriminator:
+    propertyName: type
+    mapping:
+      Mammal: '#/components/schemas/Mammal'
+      Dog: '#/components/schemas/Dog'
+
+Mammal:
+  allOf:
+    - $ref: '#/components/schemas/Animal'
+
+Dog:
+  allOf:
+    - $ref: '#/components/schemas/Mammal'
+```
+
+In that case `Mammal` is a mapped schema, but it is also a parent of `Dog`. With compatibility mode enabled, `Mammal` is skipped and only true leaf schemas receive constraints.
+
 ```
 oas-utils add-discriminator-const <input.yaml> -o output.yaml
+# Force OAS 3.1 uplift so auto/const can emit const
+oas-utils add-discriminator-const <input.yaml> -o output.yaml --force-uplift
 # Force legacy placement
 oas-utils add-discriminator-const <input.yaml> -o output.yaml --placement children
 # In legacy placement, skip allOf parents in mapped inheritance chains
@@ -145,6 +276,7 @@ oas-utils add-discriminator-const <input.yaml> -o output.yaml --mode adapt
 Options:
 - -o, --output: write result to this file (defaults to stdout).
 - --mode: discriminator keyword mode (`auto`, `const`, `enum`, `adapt`).
+- --force-uplift: upgrade OpenAPI 3.0.x inputs to 3.1.0 before generating constraints.
 - --placement: placement strategy (`oneOf-branches` default, `children` legacy).
 - --compatibility-mode: only applies to `children` placement; skips mapped allOf parent schemas when a mapped child extends them.
 

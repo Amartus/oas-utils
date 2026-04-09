@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1] - 2026-04-09
+### Changed
+- `addDiscriminatorConst` now treats `auto` as `OpenAPI 3.0.x -> enum` and `OpenAPI 3.1.x -> const`.
+- `addDiscriminatorConst` now collapses multiple discriminator values targeting the same schema into a single multi-value `enum` in both `oneOf-branches` and `children` placement modes.
+- Standalone `add-discriminator-const` surfaces now support a `forceUplift` / `--force-uplift` option to upgrade OpenAPI 3.0.x inputs to 3.1.0 before generating constraints.
+
+### Fixed
+- Updated direct and integration discriminator-constraint tests to cover the new OpenAPI-version semantics, uplift behavior, idempotency, and multi-value mapping support.
+
 ## [0.10.0] - 2026-03-28
 ### Added
 - New `addDiscriminatorConst` transformation that adds `const`/`enum` constraints to oneOf branches based on discriminator mappings.

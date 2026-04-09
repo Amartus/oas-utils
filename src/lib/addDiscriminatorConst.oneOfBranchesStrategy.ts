@@ -1,8 +1,29 @@
 import { createConstConstraint, hasConstraintInOneOfEntry, isSchemaReference, oneOfEntryTargetsRef } from './discriminatorConstraintUtils.js';
 import type { DiscriminatorContext } from './addDiscriminatorConst.types.js';
 
+/**
+ * Strategy: inject discriminator constraints into `oneOf` entries on the **parent** schema.
+ *
+ * For each `(discriminatorValue, $ref)` pair in the mapping this function:
+ *
+ * 1. Searches the parent's `oneOf` array for an entry that already targets the given `$ref`.
+ *
+ * 2. **Entry not found** - appends a new wrapper `{ allOf: [{ $ref }, constraint] }` to `oneOf`.
+ *    This covers the case where the mapping references a schema that is not yet listed in the
+ *    parent's `oneOf`.
+ *
+ * 3. **Entry found, already constrained** - skips silently (idempotent).
+ *
+ * 4. **Entry found, bare `$ref`** - replaces the entry with `{ allOf: [{ $ref }, constraint] }`
+ *    so the reference is preserved while gaining the discriminator constraint.
+ *
+ * 5. **Entry found, already an `allOf` wrapper** - appends the constraint object to the
+ *    existing `allOf` array without altering other members.
+ *
+ * @returns `true` if at least one `oneOf` entry was modified or added.
+ */
 export function addConstraintsToOneOfBranches(ctx: DiscriminatorContext): boolean {
-  const { schema, propertyName, mapping, construct, result } = ctx;
+  const { schema, propertyName, mappingTargets, construct, result } = ctx;
 
   if (!Array.isArray(schema.oneOf)) {
     return false;
@@ -11,13 +32,9 @@ export function addConstraintsToOneOfBranches(ctx: DiscriminatorContext): boolea
   const oneOfEntries = schema.oneOf as unknown[];
   let schemaUpdated = false;
 
-  for (const [discriminatorValue, ref] of Object.entries(mapping)) {
-    if (typeof ref !== 'string') {
-      continue;
-    }
-
+  for (const { ref, values } of mappingTargets) {
     const index = oneOfEntries.findIndex(entry => oneOfEntryTargetsRef(entry, ref));
-    const constraint = createConstConstraint(propertyName, discriminatorValue, construct);
+    const constraint = createConstConstraint(propertyName, values, construct);
 
     if (index === -1) {
       oneOfEntries.push({ allOf: [{ $ref: ref }, constraint] });
@@ -27,7 +44,7 @@ export function addConstraintsToOneOfBranches(ctx: DiscriminatorContext): boolea
     }
 
     const existing = oneOfEntries[index];
-    if (hasConstraintInOneOfEntry(existing, propertyName, discriminatorValue)) {
+    if (hasConstraintInOneOfEntry(existing, propertyName, values)) {
       continue;
     }
 

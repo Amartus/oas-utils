@@ -417,6 +417,8 @@ export async function runInlineSchema(
  * Mode behavior:
  * - 'auto' (default): examines OAS version; 3.0.x → const, 3.1.x → enum
  * - 'const' or 'enum': explicitly use that construct
+ * - 'auto': OAS 3.0.x → enum, OAS 3.1.x → const
+ * - 'const': emit const only for OAS 3.1.x unless forceUplift is enabled
  * - 'adapt': use const and upgrade OAS 3.0.x → 3.1.0
  * 
  * @param opts - Options including mode and output path
@@ -424,7 +426,7 @@ export async function runInlineSchema(
  * @param reader - Function to read input
  */
 export async function runAddDiscriminatorConst(
-  opts: { mode?: ConstMode; placement?: ConstPlacement; compatibilityMode?: boolean; output?: string },
+  opts: { mode?: ConstMode; forceUplift?: boolean; placement?: ConstPlacement; compatibilityMode?: boolean; output?: string },
   format: (doc: any, target?: string) => string,
   reader: () => Promise<string>
 ) {
@@ -434,6 +436,7 @@ export async function runAddDiscriminatorConst(
 
   const result = addDiscriminatorConst(doc, {
     mode: opts.mode || 'auto',
+    forceUplift: opts.forceUplift,
     placement: opts.placement || 'oneOf-branches',
     compatibilityMode: opts.compatibilityMode,
   });
@@ -445,7 +448,7 @@ export async function runAddDiscriminatorConst(
   }
 
   if (result.versionUpgraded) {
-    console.error(`[ADD-DISCRIMINATOR-CONST] Upgraded OpenAPI version to 3.1.0 (adapt mode).`);
+    console.error(`[ADD-DISCRIMINATOR-CONST] Upgraded OpenAPI version to 3.1.0.`);
   }
 
   await writeOutput(doc, opts.output, format);

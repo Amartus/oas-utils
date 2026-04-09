@@ -15,6 +15,7 @@ import type {
   ConstMode,
   ConstPlacement,
   DiscriminatorContext,
+  DiscriminatorMappingTarget,
 } from './addDiscriminatorConst.types.js';
 
 export type {
@@ -32,17 +33,16 @@ export { createConstConstraint, hasConstOrEnumConstraint };
 const isValidObject = (obj: unknown): obj is Record<string, unknown> =>
   obj !== null && typeof obj === 'object' && !Array.isArray(obj);
 
-function resolveConstruct(doc: Record<string, unknown>, mode: ConstMode, result: AddDiscriminatorConstResult): Construct {
-  if (mode === 'auto') {
-    const version = getOpenApiVersion(doc);
-    return version && version.match(/^3\.1\./) ? 'enum' : 'const';
-  }
+function resolveConstruct(
+  doc: Record<string, unknown>,
+  mode: ConstMode,
+  forceUplift: boolean,
+  result: AddDiscriminatorConstResult,
+  onWarning?: (message: string) => void
+): Construct {
+  const oldVersion = getOpenApiVersion(doc);
 
-  if (mode === 'enum') {
-    return 'enum';
-  }
-
-  if (mode === 'adapt') {
+  if ((mode === 'adapt' || forceUplift) && mode !== 'enum') {
     const oldVersion = getOpenApiVersion(doc);
     upgradeToOas31(doc);
     const newVersion = getOpenApiVersion(doc);
@@ -51,7 +51,49 @@ function resolveConstruct(doc: Record<string, unknown>, mode: ConstMode, result:
     }
   }
 
-  return 'const';
+  const version = getOpenApiVersion(doc);
+  const supportsConst = Boolean(version?.match(/^3\.1\./));
+
+  if (mode === 'enum') {
+    return 'enum';
+  }
+
+  if (mode === 'adapt') {
+    return 'const';
+  }
+
+  if (mode === 'auto') {
+    return supportsConst ? 'const' : 'enum';
+  }
+
+  if (supportsConst) {
+    return 'const';
+  }
+
+  if (oldVersion && !forceUplift) {
+    onWarning?.(`mode='const' requested for OpenAPI ${oldVersion}; using enum because const is only emitted for OpenAPI 3.1.x unless forceUplift is enabled.`);
+  }
+
+  return 'enum';
+}
+
+function groupDiscriminatorMapping(mapping: Record<string, string>): DiscriminatorMappingTarget[] {
+  const grouped = new Map<string, string[]>();
+
+  for (const [discriminatorValue, ref] of Object.entries(mapping)) {
+    if (typeof ref !== 'string') {
+      continue;
+    }
+
+    const values = grouped.get(ref) ?? [];
+    values.push(discriminatorValue);
+    grouped.set(ref, values);
+  }
+
+  return [...grouped.entries()].map(([ref, values]) => ({
+    ref,
+    values: [...new Set(values)],
+  }));
 }
 
 function createDiscriminatorContext(
@@ -59,6 +101,7 @@ function createDiscriminatorContext(
   schema: Record<string, unknown>,
   propertyName: string,
   mapping: Record<string, string>,
+  mappingTargets: DiscriminatorMappingTarget[],
   construct: Construct,
   compatibilityMode: boolean,
   result: AddDiscriminatorConstResult
@@ -68,6 +111,7 @@ function createDiscriminatorContext(
     schema,
     propertyName,
     mapping,
+    mappingTargets,
     construct,
     compatibilityMode,
     result,
@@ -80,15 +124,16 @@ function createDiscriminatorContext(
  * Add const/enum constraints to oneOf children based on discriminator mappings.
  * 
  * Targets schemas with oneOf + discriminator.mapping. For each mapped child:
- * - Resolves the child schema name from the $ref
- * - Gets the discriminator value from the mapping key
+ * - Groups discriminator values by target $ref
  * - Skips if the child already has the constraint
- * - Adds constraint to child's allOf array (creates if needed)
+ * - Adds one constraint fragment per target branch or child schema
  * 
  * Mode behavior:
- * - 'auto' (default): examines doc.openapi version; OAS 3.0.x → const, 3.1.x → enum
- * - 'const' or 'enum': explicitly use that construct
+ * - 'auto' (default): examines doc.openapi version; OAS 3.0.x → enum, OAS 3.1.x → const
+ * - 'const': emit const only on OAS 3.1.x; otherwise fall back to enum unless `forceUplift` is enabled
+ * - 'enum': explicitly use enum
  * - 'adapt': use const and upgrade doc.openapi to 3.1.0 (no-op if already ≥ 3.1)
+ * - multi-value mappings always use enum, regardless of mode
  * 
  * @param doc - The OpenAPI document (will be modified in-place)
  * @param opts - Optional configuration
@@ -112,7 +157,8 @@ export function addDiscriminatorConst(
   const mode: ConstMode = opts.mode ?? 'auto';
   const placement: ConstPlacement = opts.placement ?? 'oneOf-branches';
   const compatibilityMode = opts.compatibilityMode ?? false;
-  const construct = resolveConstruct(doc as Record<string, unknown>, mode, result);
+  const forceUplift = opts.forceUplift ?? false;
+  const construct = resolveConstruct(doc as Record<string, unknown>, mode, forceUplift, result, opts.onWarning);
 
   // Process schemas with oneOf + discriminator.mapping
   for (const [, schema] of Object.entries(schemas)) {
@@ -127,11 +173,15 @@ export function addDiscriminatorConst(
     
     if (!propertyName || !isValidObject(mapping)) continue;
 
+    const mappingTargets = groupDiscriminatorMapping(mapping);
+    if (mappingTargets.length === 0) continue;
+
     const ctx = createDiscriminatorContext(
       schemas,
       schema,
       propertyName,
       mapping,
+      mappingTargets,
       construct,
       compatibilityMode,
       result

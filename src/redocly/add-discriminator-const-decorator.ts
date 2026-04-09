@@ -8,6 +8,9 @@ export default function AddDiscriminatorConstDecorator(opts: any) {
         
         addDiscriminatorConst(target, {
           mode,
+          forceUplift: Boolean(opts?.forceUplift),
+          placement: opts?.placement,
+          compatibilityMode: opts?.compatibilityMode,
         });
       },
     },

@@ -592,10 +592,10 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     );
 
     const placeRefBranchConst = branchForPlaceRef?.allOf?.some(
-      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef"
+      (item: any) => Array.isArray(item?.properties?.["@type"]?.enum) && item.properties["@type"].enum.includes("PlaceRef")
     );
     const placeRefExtBranchConst = branchForPlaceRefExt?.allOf?.some(
-      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef_Ext"
+      (item: any) => Array.isArray(item?.properties?.["@type"]?.enum) && item.properties["@type"].enum.includes("PlaceRef_Ext")
     );
 
     expect(placeRefBranchConst).toBe(true);
@@ -630,10 +630,10 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     });
 
     const placeRefHasConst = result.components.schemas.PlaceRef.allOf.some(
-      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef"
+      (item: any) => Array.isArray(item?.properties?.["@type"]?.enum) && item.properties["@type"].enum.includes("PlaceRef")
     );
     const placeRefExtHasConst = result.components.schemas.PlaceRef_Ext.allOf.some(
-      (item: any) => item?.properties?.["@type"]?.const === "PlaceRef_Ext"
+      (item: any) => Array.isArray(item?.properties?.["@type"]?.enum) && item.properties["@type"].enum.includes("PlaceRef_Ext")
     );
 
     expect(placeRefHasConst).toBe(true);

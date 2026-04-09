@@ -357,8 +357,13 @@ program
   )
   .option(
     "--mode <mode>",
-    "Constraint mode: 'auto' (default) uses const for OAS 3.0.x and enum for 3.1.x, 'const' always uses const, 'enum' always uses enum, 'adapt' uses const and upgrades OAS 3.0.x to 3.1.0",
+    "Constraint mode: 'auto' (default) uses enum for OAS 3.0.x and const for 3.1.x, 'const' uses const only on OAS 3.1.x unless force-uplift is enabled, 'enum' always uses enum, 'adapt' uses const and upgrades OAS 3.0.x to 3.1.0",
     "auto"
+  )
+  .option(
+    "--force-uplift",
+    "Upgrade OAS 3.0.x inputs to 3.1.0 before generating constraints",
+    false
   )
   .option(
     "--placement <placement>",
@@ -373,7 +378,7 @@ program
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; mode?: string; placement?: string; compatibilityMode?: boolean }
+      opts: { output?: string; mode?: string; forceUplift?: boolean; placement?: string; compatibilityMode?: boolean }
     ) => {
       try {
         if (!['auto', 'const', 'enum', 'adapt'].includes(opts.mode || 'auto')) {
@@ -385,6 +390,7 @@ program
         await runAddDiscriminatorConst(
           {
             mode: opts.mode as any,
+            forceUplift: opts.forceUplift,
             placement: opts.placement as any,
             compatibilityMode: opts.compatibilityMode,
             output: opts.output,
