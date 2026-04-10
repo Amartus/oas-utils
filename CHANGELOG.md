@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.2] - 2026-04-10
+### Changed
+- `addDiscriminatorConst` now propagates the JSON Schema `type` of the discriminator property into generated `const`/`enum` constraint fragments. When the parent schema defines a `type` for the discriminator property (e.g. `type: string`) — directly in `properties` or inside an `allOf` member — that type is included in the emitted constraint (e.g. `{ type: string, const: "Cat" }`).
+- `createConstConstraint` helper accepts an optional `propertyType` parameter to carry the property's type into the constraint object.
+
+### Added
+- `DiscriminatorContext` now carries an optional `discriminatorPropertyType` field resolved from the parent schema.
+- Test coverage for type propagation in both `children` and `oneOf-branches` placement modes, and for cases where no type is defined.
+
 ## [0.10.1] - 2026-04-09
 ### Changed
 - `addDiscriminatorConst` now treats `auto` as `OpenAPI 3.0.x -> enum` and `OpenAPI 3.1.x -> const`.

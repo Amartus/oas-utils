@@ -23,7 +23,7 @@ import type { DiscriminatorContext } from './addDiscriminatorConst.types.js';
  * @returns `true` if at least one `oneOf` entry was modified or added.
  */
 export function addConstraintsToOneOfBranches(ctx: DiscriminatorContext): boolean {
-  const { schema, propertyName, mappingTargets, construct, result } = ctx;
+  const { schema, propertyName, mappingTargets, construct, discriminatorPropertyType, result } = ctx;
 
   if (!Array.isArray(schema.oneOf)) {
     return false;
@@ -34,7 +34,7 @@ export function addConstraintsToOneOfBranches(ctx: DiscriminatorContext): boolea
 
   for (const { ref, values } of mappingTargets) {
     const index = oneOfEntries.findIndex(entry => oneOfEntryTargetsRef(entry, ref));
-    const constraint = createConstConstraint(propertyName, values, construct);
+    const constraint = createConstConstraint(propertyName, values, construct, discriminatorPropertyType);
 
     if (index === -1) {
       oneOfEntries.push({ allOf: [{ $ref: ref }, constraint] });

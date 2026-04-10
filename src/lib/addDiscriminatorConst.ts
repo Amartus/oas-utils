@@ -96,6 +96,39 @@ function groupDiscriminatorMapping(mapping: Record<string, string>): Discriminat
   }));
 }
 
+/**
+ * Resolve the JSON Schema `type` of a discriminator property from the parent schema.
+ *
+ * Checks:
+ * 1. `schema.properties[propertyName].type`
+ * 2. Each `allOf` member of the schema for the same
+ */
+function resolveDiscriminatorPropertyType(
+  schema: Record<string, unknown>,
+  propertyName: string
+): string | undefined {
+  // Check direct properties
+  if (isValidObject(schema.properties)) {
+    const propSchema = schema.properties[propertyName];
+    if (isValidObject(propSchema) && typeof propSchema.type === 'string') {
+      return propSchema.type;
+    }
+  }
+
+  // Check allOf members
+  if (Array.isArray(schema.allOf)) {
+    for (const member of schema.allOf) {
+      if (!isValidObject(member) || !isValidObject(member.properties)) continue;
+      const propSchema = member.properties[propertyName];
+      if (isValidObject(propSchema) && typeof propSchema.type === 'string') {
+        return propSchema.type;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function createDiscriminatorContext(
   schemas: Record<string, unknown>,
   schema: Record<string, unknown>,
@@ -110,6 +143,7 @@ function createDiscriminatorContext(
     schemas,
     schema,
     propertyName,
+    discriminatorPropertyType: resolveDiscriminatorPropertyType(schema, propertyName),
     mapping,
     mappingTargets,
     construct,

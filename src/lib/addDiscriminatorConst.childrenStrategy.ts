@@ -73,7 +73,7 @@ function getMappedAllOfParentNames(
  * @returns `true` if at least one child schema was modified.
  */
 export function addConstraintsToChildren(ctx: DiscriminatorContext): boolean {
-  const { schemas, propertyName, mapping, mappingTargets, construct, compatibilityMode, result } = ctx;
+  const { schemas, propertyName, mapping, mappingTargets, construct, discriminatorPropertyType, compatibilityMode, result } = ctx;
   const allOfParentNames = compatibilityMode
     ? getMappedAllOfParentNames(mapping, schemas)
     : undefined;
@@ -105,7 +105,7 @@ export function addConstraintsToChildren(ctx: DiscriminatorContext): boolean {
     }
 
     const allOf = mutableChild.allOf as unknown[];
-    const constraint = createConstConstraint(propertyName, values, construct);
+    const constraint = createConstConstraint(propertyName, values, construct, discriminatorPropertyType);
     allOf.push(constraint);
 
     schemaUpdated = true;

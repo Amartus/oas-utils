@@ -18,20 +18,22 @@ function enumCoversValues(enumValues: unknown, values: string[]): boolean {
 export function createConstConstraint(
   propName: string,
   values: string | string[],
-  construct: Construct = 'const'
+  construct: Construct = 'const',
+  propertyType?: string
 ): Record<string, unknown> {
   const normalizedValues = normalizeConstraintValues(values);
+  const typeEntry = propertyType ? { type: propertyType } : {};
 
   if (normalizedValues.length !== 1 || construct === 'enum') {
     return {
       type: 'object',
-      properties: { [propName]: { enum: normalizedValues } }
+      properties: { [propName]: { ...typeEntry, enum: normalizedValues } }
     };
   }
 
   return {
     type: 'object',
-    properties: { [propName]: { const: normalizedValues[0] } }
+    properties: { [propName]: { ...typeEntry, const: normalizedValues[0] } }
   };
 }
 

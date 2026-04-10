@@ -147,6 +147,36 @@ describe("addDiscriminatorConst", () => {
         }
       });
     });
+
+    it("includes propertyType in const constraint when provided", () => {
+      const constraint = createConstConstraint("@type", "cat", "const", "string");
+      expect(constraint).toEqual({
+        type: "object",
+        properties: {
+          "@type": { type: "string", const: "cat" }
+        }
+      });
+    });
+
+    it("includes propertyType in enum constraint when provided", () => {
+      const constraint = createConstConstraint("@type", "dog", "enum", "string");
+      expect(constraint).toEqual({
+        type: "object",
+        properties: {
+          "@type": { type: "string", enum: ["dog"] }
+        }
+      });
+    });
+
+    it("includes propertyType in multi-value enum constraint when provided", () => {
+      const constraint = createConstConstraint("@type", ["cat", "feline"], "const", "string");
+      expect(constraint).toEqual({
+        type: "object",
+        properties: {
+          "@type": { type: "string", enum: ["cat", "feline"] }
+        }
+      });
+    });
   });
 
   describe("hasConstOrEnumConstraint helper", () => {
@@ -510,6 +540,116 @@ describe("addDiscriminatorConst", () => {
       expect(second.constAdded).toBe(0);
       expect(doc.components.schemas.Cat.allOf).toHaveLength(1);
       expectSchemaConstraint(doc, "Cat", "petType", ["cat", "feline"], "enum");
+    });
+  });
+
+  describe("discriminator property type propagation", () => {
+    it("includes type in children constraint when discriminator property has a type in parent schema", () => {
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            Animal: {
+              oneOf: [{ $ref: ref("Cat") }, { $ref: ref("Dog") }],
+              discriminator: {
+                propertyName: "@type",
+                mapping: { cat: ref("Cat"), dog: ref("Dog") },
+              },
+              type: "object",
+              properties: {
+                "@type": { type: "string" },
+              },
+            },
+            Cat: objectSchema({ name: { type: "string" } }),
+            Dog: objectSchema({ breed: { type: "string" } }),
+          },
+        },
+      };
+
+      addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      const catConstraint = doc.components.schemas.Cat.allOf.find(
+        (item: any) => item?.properties?.["@type"] !== undefined
+      );
+      expect(catConstraint?.properties["@type"]).toEqual({ type: "string", const: "cat" });
+    });
+
+    it("includes type in oneOf-branches constraint when discriminator property has a type", () => {
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            Animal: {
+              oneOf: [{ $ref: ref("Cat") }, { $ref: ref("Dog") }],
+              discriminator: {
+                propertyName: "@type",
+                mapping: { cat: ref("Cat"), dog: ref("Dog") },
+              },
+              type: "object",
+              properties: {
+                "@type": { type: "string" },
+              },
+            },
+            Cat: objectSchema({ name: { type: "string" } }),
+            Dog: objectSchema({ breed: { type: "string" } }),
+          },
+        },
+      };
+
+      addDiscriminatorConst(doc, { mode: "const" });
+
+      const animalSchema = doc.components.schemas.Animal;
+      const catEntry = animalSchema.oneOf.find(
+        (entry: any) => Array.isArray(entry?.allOf) && entry.allOf.some((item: any) => item?.$ref === ref("Cat"))
+      );
+      const catConstraint = catEntry?.allOf.find((item: any) => item?.properties?.["@type"] !== undefined);
+      expect(catConstraint?.properties["@type"]).toEqual({ type: "string", const: "cat" });
+    });
+
+    it("does not include type when discriminator property has no type defined", () => {
+      const doc = buildDoc("Animal", "@type", { cat: "Cat", dog: "Dog" }, {
+        Cat: objectSchema({ name: { type: "string" } }),
+        Dog: objectSchema({ breed: { type: "string" } }),
+      });
+
+      addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      const catConstraint = doc.components.schemas.Cat.allOf.find(
+        (item: any) => item?.properties?.["@type"] !== undefined
+      );
+      expect(catConstraint?.properties["@type"]).not.toHaveProperty("type");
+      expect(catConstraint?.properties["@type"]).toEqual({ const: "cat" });
+    });
+
+    it("resolves discriminator property type from allOf member in parent schema", () => {
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            Animal: {
+              allOf: [
+                {
+                  type: "object",
+                  properties: { "@type": { type: "string" } },
+                },
+              ],
+              oneOf: [{ $ref: ref("Cat") }],
+              discriminator: {
+                propertyName: "@type",
+                mapping: { cat: ref("Cat") },
+              },
+            },
+            Cat: objectSchema({ name: { type: "string" } }),
+          },
+        },
+      };
+
+      addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      const catConstraint = doc.components.schemas.Cat.allOf.find(
+        (item: any) => item?.properties?.["@type"] !== undefined
+      );
+      expect(catConstraint?.properties["@type"]).toEqual({ type: "string", const: "cat" });
     });
   });
 });

@@ -55,13 +55,32 @@ export interface AddDiscriminatorConstResult {
   versionUpgraded: boolean;
 }
 
+/**
+ * Shared context passed to discriminator constraint injection strategies.
+ *
+ * Carries everything a strategy needs to determine which schemas to update,
+ * what constraint value(s) to apply, and how to track the result.
+ */
 export interface DiscriminatorContext {
+  /** All component schemas from `doc.components.schemas`. */
   schemas: Record<string, unknown>;
+  /** The parent schema that owns the `discriminator` and `oneOf`. */
   schema: Record<string, unknown>;
+  /** The name of the discriminator property (e.g. `"@type"`). */
   propertyName: string;
+  /** The JSON Schema `type` of the discriminator property, if resolvable (e.g. `"string"`). */
+  discriminatorPropertyType?: string;
+  /** Raw `discriminator.mapping` object: maps discriminator values to `$ref` strings. */
   mapping: Record<string, string>;
+  /** Grouped mapping targets: one entry per unique `$ref`, with all discriminator values that point to it. */
   mappingTargets: DiscriminatorMappingTarget[];
+  /** Whether to emit `const` or `enum` constraints. */
   construct: Construct;
+  /**
+   * When `true`, intermediate parent schemas that are composed via `allOf` by another
+   * mapped child are skipped to avoid double-constraining abstract base types.
+   */
   compatibilityMode: boolean;
+  /** Mutable result object updated by the strategy as it applies constraints. */
   result: AddDiscriminatorConstResult;
 }
