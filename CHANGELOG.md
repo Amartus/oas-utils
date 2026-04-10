@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.3] - 2026-04-10
+### Changed
+- Refactored discriminator property type resolution to travers whole inheritence tree
+### Added
+- Test coverage for multi-level `$ref` ancestry traversal (property type resolved two hops away) and cycle safety in circular `allOf` references.
+
 ## [0.10.2] - 2026-04-10
 ### Changed
 - `addDiscriminatorConst` now propagates the JSON Schema `type` of the discriminator property into generated `const`/`enum` constraint fragments. When the parent schema defines a `type` for the discriminator property (e.g. `type: string`) — directly in `properties` or inside an `allOf` member — that type is included in the emitted constraint (e.g. `{ type: string, const: "Cat" }`).

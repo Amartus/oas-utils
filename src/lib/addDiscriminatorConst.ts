@@ -5,7 +5,7 @@
  * used by allOfToOneOfJsonPath.ts for the allOf→oneOf discriminator patterns.
  */
 
-import { getOpenApiVersion, upgradeToOas31 } from './oasUtils.js';
+import { getOpenApiVersion, upgradeToOas31, getAncestors } from './oasUtils.js';
 import { addConstraintsToOneOfBranches } from './addDiscriminatorConst.oneOfBranchesStrategy.js';
 import { addConstraintsToChildren } from './addDiscriminatorConst.childrenStrategy.js';
 import { createConstConstraint, hasConstOrEnumConstraint, type Construct } from './discriminatorConstraintUtils.js';
@@ -97,33 +97,60 @@ function groupDiscriminatorMapping(mapping: Record<string, string>): Discriminat
 }
 
 /**
- * Resolve the JSON Schema `type` of a discriminator property from the parent schema.
+ * Pre-compute all transitive `allOf` ancestors for every schema in one pass.
+ * Uses the existing `getAncestors` utility, keyed by schema name.
+ */
+function buildAncestorIndex(schemas: Record<string, unknown>): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
+  for (const name of Object.keys(schemas)) {
+    index.set(name, getAncestors(name, schemas));
+  }
+  return index;
+}
+
+/**
+ * Resolve the JSON Schema `type` of a discriminator property by checking the schema
+ * itself and then iterating its pre-computed ancestor set (BFS order).
  *
- * Checks:
+ * For each candidate schema:
  * 1. `schema.properties[propertyName].type`
- * 2. Each `allOf` member of the schema for the same
+ * 2. Inline `allOf` member `properties[propertyName].type`
  */
 function resolveDiscriminatorPropertyType(
+  schemas: Record<string, unknown>,
+  ancestorIndex: Map<string, Set<string>>,
+  schemaName: string,
   schema: Record<string, unknown>,
   propertyName: string
 ): string | undefined {
-  // Check direct properties
-  if (isValidObject(schema.properties)) {
-    const propSchema = schema.properties[propertyName];
-    if (isValidObject(propSchema) && typeof propSchema.type === 'string') {
-      return propSchema.type;
-    }
-  }
-
-  // Check allOf members
-  if (Array.isArray(schema.allOf)) {
-    for (const member of schema.allOf) {
-      if (!isValidObject(member) || !isValidObject(member.properties)) continue;
-      const propSchema = member.properties[propertyName];
+  const checkSchema = (s: Record<string, unknown>): string | undefined => {
+    if (isValidObject(s.properties)) {
+      const propSchema = s.properties[propertyName];
       if (isValidObject(propSchema) && typeof propSchema.type === 'string') {
         return propSchema.type;
       }
     }
+    if (Array.isArray(s.allOf)) {
+      for (const member of s.allOf) {
+        if (isValidObject(member) && isValidObject(member.properties)) {
+          const propSchema = member.properties[propertyName];
+          if (isValidObject(propSchema) && typeof propSchema.type === 'string') {
+            return propSchema.type;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  const direct = checkSchema(schema);
+  if (direct !== undefined) return direct;
+
+  for (const ancestorName of ancestorIndex.get(schemaName) ?? []) {
+    const ancestor = schemas[ancestorName];
+    if (!isValidObject(ancestor)) continue;
+    const found = checkSchema(ancestor);
+    if (found !== undefined) return found;
   }
 
   return undefined;
@@ -131,6 +158,8 @@ function resolveDiscriminatorPropertyType(
 
 function createDiscriminatorContext(
   schemas: Record<string, unknown>,
+  ancestorIndex: Map<string, Set<string>>,
+  schemaName: string,
   schema: Record<string, unknown>,
   propertyName: string,
   mapping: Record<string, string>,
@@ -143,7 +172,7 @@ function createDiscriminatorContext(
     schemas,
     schema,
     propertyName,
-    discriminatorPropertyType: resolveDiscriminatorPropertyType(schema, propertyName),
+    discriminatorPropertyType: resolveDiscriminatorPropertyType(schemas, ancestorIndex, schemaName, schema, propertyName),
     mapping,
     mappingTargets,
     construct,
@@ -193,9 +222,10 @@ export function addDiscriminatorConst(
   const compatibilityMode = opts.compatibilityMode ?? false;
   const forceUplift = opts.forceUplift ?? false;
   const construct = resolveConstruct(doc as Record<string, unknown>, mode, forceUplift, result, opts.onWarning);
+  const parentIndex = buildAncestorIndex(schemas);
 
   // Process schemas with oneOf + discriminator.mapping
-  for (const [, schema] of Object.entries(schemas)) {
+  for (const [schemaName, schema] of Object.entries(schemas)) {
     if (!isValidObject(schema)) continue;
 
     // Only target schemas with oneOf + discriminator.mapping
@@ -212,6 +242,8 @@ export function addDiscriminatorConst(
 
     const ctx = createDiscriminatorContext(
       schemas,
+      parentIndex,
+      schemaName,
       schema,
       propertyName,
       mapping,

@@ -651,5 +651,71 @@ describe("addDiscriminatorConst", () => {
       );
       expect(catConstraint?.properties["@type"]).toEqual({ type: "string", const: "cat" });
     });
+
+    it("resolves discriminator property type by following $ref chain in allOf ancestry", () => {
+      // Animal has no properties; AnimalBase is referenced via allOf->$ref and carries the type
+      // BaseEntity is referenced from AnimalBase via allOf->$ref and carries the "@type" definition
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            BaseEntity: {
+              type: "object",
+              properties: { "@type": { type: "string" } },
+            },
+            AnimalBase: {
+              allOf: [{ $ref: ref("BaseEntity") }],
+              type: "object",
+            },
+            Animal: {
+              allOf: [{ $ref: ref("AnimalBase") }],
+              oneOf: [{ $ref: ref("Cat") }],
+              discriminator: {
+                propertyName: "@type",
+                mapping: { cat: ref("Cat") },
+              },
+            },
+            Cat: objectSchema({ name: { type: "string" } }),
+          },
+        },
+      };
+
+      addDiscriminatorConst(doc, { mode: "const", placement: "children" });
+
+      const catConstraint = doc.components.schemas.Cat.allOf.find(
+        (item: any) => item?.properties?.["@type"] !== undefined
+      );
+      expect(catConstraint?.properties["@type"]).toEqual({ type: "string", const: "cat" });
+    });
+
+    it("is cycle-safe when schemas form a circular allOf reference", () => {
+      const doc: any = {
+        openapi: "3.1.0",
+        components: {
+          schemas: {
+            A: {
+              allOf: [{ $ref: ref("B") }],
+              oneOf: [{ $ref: ref("Cat") }],
+              discriminator: {
+                propertyName: "@type",
+                mapping: { cat: ref("Cat") },
+              },
+            },
+            B: {
+              allOf: [{ $ref: ref("A") }],
+              type: "object",
+            },
+            Cat: objectSchema({ name: { type: "string" } }),
+          },
+        },
+      };
+
+      // Must not throw or hang; no type found so constraint should have no type field
+      expect(() => addDiscriminatorConst(doc, { mode: "const", placement: "children" })).not.toThrow();
+      const catConstraint = doc.components.schemas.Cat.allOf?.find(
+        (item: any) => item?.properties?.["@type"] !== undefined
+      );
+      expect(catConstraint?.properties["@type"]).toEqual({ const: "cat" });
+    });
   });
 });
