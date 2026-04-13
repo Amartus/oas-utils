@@ -197,15 +197,25 @@ program
     "Automatically upgrade OpenAPI/JSON Schema version to support unevaluatedProperties",
     false
   )
+  .option(
+    "--exclude <names>",
+    "Comma-separated list of schema names to exclude from sealing"
+  )
+  .option(
+    "--force-sealing",
+    "Force sealing even when a schema has additionalProperties/unevaluatedProperties set to true",
+    false
+  )
   .action(
     async (
       input: string | undefined,
-      opts: { output?: string; useUnevaluatedProperties?: boolean; useAdditionalProperties?: boolean; uplift?: boolean }
+      opts: { output?: string; useUnevaluatedProperties?: boolean; useAdditionalProperties?: boolean; uplift?: boolean; exclude?: string; forceSealing?: boolean }
     ) => {
       try {
         const useUnevaluated = !opts.useAdditionalProperties;
+        const exclude = opts.exclude ? opts.exclude.split(",").map(s => s.trim()).filter(Boolean) : [];
         await runSealSchema(
-          { output: opts.output, useUnevaluatedProperties: useUnevaluated, uplift: opts.uplift },
+          { output: opts.output, useUnevaluatedProperties: useUnevaluated, uplift: opts.uplift, exclude, forceSealing: opts.forceSealing },
           format,
           () => reader(input)
         );

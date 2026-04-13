@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { allOfToOneOf } from "../src/lib/allOfToOneOfJsonPath.js";
 import { sealSchema } from "../src/lib/sealSchema.js";
 import {
@@ -995,6 +995,204 @@ describe("sealSchema", () => {
       expect(doc.servers).toEqual([{ url: "https://api.example.com" }]);
       expect(doc.paths).toBeDefined();
       expect(doc.components.schemas.Pet.unevaluatedProperties).toBe(false);
+    });
+  });
+
+  describe("not clause — no sealing inside not", () => {
+    it("does not seal an object schema inside a not clause", () => {
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Outer: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          not: {
+            type: "object",
+            properties: { forbidden: { type: "string" } },
+          },
+        },
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.Outer.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Outer.not.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Outer.not.additionalProperties).toBeUndefined();
+    });
+
+    it("does not seal an allOf composition inside a not clause", () => {
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Base: objectSchema({ id: { type: "string" } }),
+        Wrapper: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          not: {
+            allOf: [{ $ref: ref("Base") }],
+          },
+        },
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.Wrapper.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Wrapper.not.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Wrapper.not.additionalProperties).toBeUndefined();
+    });
+  });
+
+  describe("exclude option — skip named schemas from sealing", () => {
+    it("does not seal a schema whose name is in the exclude list", () => {
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Pet: objectSchema({ name: { type: "string" } }),
+        Owner: objectSchema({ fullName: { type: "string" } }),
+      } });
+
+      sealSchema(doc, { exclude: ["Pet"] });
+
+      expect(doc.components.schemas.Pet.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Pet.additionalProperties).toBeUndefined();
+      expect(doc.components.schemas.Owner.unevaluatedProperties).toBe(false);
+    });
+
+    it("does not create Core wrapper for an excluded schema used in allOf", () => {
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Animal: loadSchemaFromFile("animal"),
+        Cat: loadSchemaFromFile("cat"),
+      } });
+
+      sealSchema(doc, { exclude: ["Animal"] });
+
+      // Animal is excluded — no Core split, Animal itself is not sealed
+      expect(doc.components.schemas.AnimalCore).toBeUndefined();
+      expect(doc.components.schemas.Animal.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Animal.additionalProperties).toBeUndefined();
+
+      // Cat extends Animal via allOf and is not excluded — it is a composition root so it gets sealed
+      expect(doc.components.schemas.Cat.unevaluatedProperties).toBe(false);
+    });
+  });
+
+  describe("preserve existing sealing — do not override", () => {
+    it("does not override existing additionalProperties with non-false value", () => {
+      const existing = { ...objectSchema({ name: { type: "string" } }), additionalProperties: { type: "string" } };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { Flexible: existing } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.Flexible.additionalProperties).toEqual({ type: "string" });
+      expect(doc.components.schemas.Flexible.unevaluatedProperties).toBeUndefined();
+    });
+
+    it("does not add additionalProperties when unevaluatedProperties is already present and mode is additionalProperties", () => {
+      const existing = { ...objectSchema({ name: { type: "string" } }), unevaluatedProperties: false };
+      const doc: any = createDoc({ schemas: { Pinned: existing } });
+
+      sealSchema(doc, { useUnevaluatedProperties: false });
+
+      expect(doc.components.schemas.Pinned.unevaluatedProperties).toBe(false);
+      expect(doc.components.schemas.Pinned.additionalProperties).toBeUndefined();
+    });
+
+    it("does not add unevaluatedProperties when additionalProperties is already present and mode is unevaluatedProperties", () => {
+      const existing = { ...objectSchema({ name: { type: "string" } }), additionalProperties: false };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: { Pinned: existing } });
+
+      sealSchema(doc, { useUnevaluatedProperties: true });
+
+      expect(doc.components.schemas.Pinned.additionalProperties).toBe(false);
+      expect(doc.components.schemas.Pinned.unevaluatedProperties).toBeUndefined();
+    });
+
+    it("does not create Core wrapper for a schema that is already sealed", () => {
+      const alreadySealed = { ...loadSchemaFromFile("animal"), unevaluatedProperties: false };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Animal: alreadySealed,
+        Cat: loadSchemaFromFile("cat"),
+        Shelter: objectSchema({ animal: { $ref: ref("Animal") } }),
+      } });
+
+      sealSchema(doc);
+
+      // Animal is already sealed — no Core split should occur
+      expect(doc.components.schemas.AnimalCore).toBeUndefined();
+      expect(doc.components.schemas.Animal.unevaluatedProperties).toBe(false);
+    });
+  });
+
+  describe("explicitly open schemas (additionalProperties/unevaluatedProperties: true)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("does not seal a schema with additionalProperties: true and emits a warning", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Open: { ...objectSchema({ name: { type: "string" } }), additionalProperties: true },
+        Closed: objectSchema({ id: { type: "string" } }),
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.Open.unevaluatedProperties).toBeUndefined();
+      expect(doc.components.schemas.Open.additionalProperties).toBe(true);
+      expect(doc.components.schemas.Closed.unevaluatedProperties).toBe(false);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0][0]).toContain("Open");
+      expect(warnSpy.mock.calls[0][0]).toContain("forceSealing");
+    });
+
+    it("does not seal a composition root with unevaluatedProperties: true and emits a warning", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Base: objectSchema({ id: { type: "string" } }),
+        OpenRoot: { allOf: [{ $ref: ref("Base") }], unevaluatedProperties: true },
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.OpenRoot.unevaluatedProperties).toBe(true);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0][0]).toContain("OpenRoot");
+      expect(warnSpy.mock.calls[0][0]).toContain("forceSealing");
+    });
+
+    it("seals an explicitly-open schema when forceSealing is true and does not warn", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Open: { ...objectSchema({ name: { type: "string" } }), additionalProperties: true },
+      } });
+
+      sealSchema(doc, { forceSealing: true });
+
+      expect(doc.components.schemas.Open.unevaluatedProperties).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn for schemas already sealed with false", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        AlreadyClosed: { ...objectSchema({ name: { type: "string" } }), additionalProperties: false },
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.AlreadyClosed.additionalProperties).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("skips Core/wrapper split for explicitly-open schema used in allOf and emits warning", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const openAnimal = { ...loadSchemaFromFile("animal"), additionalProperties: true };
+      const doc: any = createDoc({ openapi: "3.1.0", schemas: {
+        Animal: openAnimal,
+        Cat: loadSchemaFromFile("cat"),
+        Shelter: objectSchema({ animal: { $ref: ref("Animal") } }),
+      } });
+
+      sealSchema(doc);
+
+      expect(doc.components.schemas.AnimalCore).toBeUndefined();
+      expect(doc.components.schemas.Animal.additionalProperties).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+      expect(warnSpy.mock.calls[0][0]).toContain("Animal");
     });
   });
 });

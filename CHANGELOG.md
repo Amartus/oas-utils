@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.10.4] - 2026-04-13
+### Added
+- `exclude` option on `sealSchema` / `runSealSchema` / CLI `--exclude` / Redocly decorator `exclude`: a list of schema names that are excluded from sealing entirely (no sealing keyword added, no Core/wrapper split).
+- `forceSealing` option on `sealSchema` / `runSealSchema` / CLI `--force-sealing` / Redocly decorator `forceSealing`: when `true`, seals schemas even if they explicitly set `additionalProperties` or `unevaluatedProperties` to `true`.
+
+### Changed
+- Schemas inside a `not` clause are no longer sealed (`unevaluatedProperties` / `additionalProperties` are not injected into `not` sub-schemas).
+- Sealing is skipped when a schema already defines `additionalProperties` or `unevaluatedProperties` (any value), preventing existing constraints from being overridden.
+- Schemas with `additionalProperties: true` or `unevaluatedProperties: true` (explicitly open) are now skipped with a `console.warn` message instead of silently. The warning advises using `forceSealing` to override.
+- The Core/wrapper split is also skipped for schemas that are already sealed or are in the `exclude` list.
+
 ## [0.10.3] - 2026-04-10
 ### Changed
 - Refactored discriminator property type resolution to travers whole inheritence tree

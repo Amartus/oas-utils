@@ -18,6 +18,8 @@ const { applyPatch } = jsonPatch;
 export interface SealSchemaOptions {
   useUnevaluatedProperties?: boolean;
   uplift?: boolean;
+  exclude?: string[];
+  forceSealing?: boolean;
 }
 
 
@@ -59,21 +61,51 @@ export function sealSchema(doc: any, opts: SealSchemaOptions = {}): any {
     }
   }
 
+  const exclude = opts.exclude ?? [];
+  const forceSealing = opts.forceSealing ?? false;
+
   const allProps = find(doc, "$..properties");
   const allRefs = toReverseMap(find(doc, `$..[?(@['$ref'])]`));
   const allOfSchemas = find(doc, "$..allOf");
 
 
-  const toSealSingle = filter(allProps, allRefs);
-  const toSealCompositions = filterCompositions(allOfSchemas, allRefs);
-  const toMap = calculateMappings(allRefs);
+  const toSealSingle = filter(allProps, allRefs, exclude);
+  const toSealCompositions = filterCompositions(allOfSchemas, allRefs, exclude);
+  const toMap = calculateMappings(allRefs, doc, exclude, forceSealing);
 
   for (const prop of toSealSingle) {
-    prop.parent[sealing] = false;
+    if (isExplicitlyOpen(prop.parent)) {
+      if (forceSealing) {
+        prop.parent[sealing] = false;
+      } else {
+        const schemaPath = JSONPath.toPathArray(prop.path).slice(0, -1);
+        const schemaPointer = JSONPath.toPointer(schemaPath);
+        const name = schemaNameFromPointer(schemaPointer) ?? schemaPointer;
+        console.warn(
+          `[SEAL-SCHEMA] Schema "${name}" has additionalProperties/unevaluatedProperties set to true (explicitly open). Skipping sealing. Use forceSealing option to override.`
+        );
+      }
+    } else if (!isAlreadySealed(prop.parent)) {
+      prop.parent[sealing] = false;
+    }
   }
 
   for (const comp of toSealCompositions) {
-    comp.parent["unevaluatedProperties"] = false;
+    if (isExplicitlyOpen(comp.parent)) {
+      if (forceSealing) {
+        comp.parent["unevaluatedProperties"] = false;
+      } else {
+        const arr = JSONPath.toPathArray(comp.path);
+        arr.pop(); // remove 'allOf'
+        const pointer = JSONPath.toPointer(arr);
+        const name = schemaNameFromPointer(pointer) ?? pointer;
+        console.warn(
+          `[SEAL-SCHEMA] Schema "${name}" has additionalProperties/unevaluatedProperties set to true (explicitly open). Skipping sealing. Use forceSealing option to override.`
+        );
+      }
+    } else if (!isAlreadySealed(comp.parent)) {
+      comp.parent["unevaluatedProperties"] = false;
+    }
   }
 
   return applyMappings(doc, toMap);
@@ -129,13 +161,30 @@ function applyMappings(doc: any, mappings: Mappings[]): any {
   return doc;
 }
 
-function calculateMappings(allRefs: Record<string, string[]>): Mappings[] {
+function calculateMappings(allRefs: Record<string, string[]>, doc: any, exclude: string[], forceSealing: boolean): Mappings[] {
   return Object.entries(allRefs)
   .filter(([_, refValues]) => refValues.length > 1)
   .filter(([_, refValues]) => {
     const count = refValues.filter((p) => isAllOf(p)).length;
     return count != 0 && count != refValues.length;
     
+  })
+  .filter(([refPointer]) => {
+    const schemaName = schemaNameFromPointer(refPointer);
+    return schemaName === undefined || !exclude.includes(schemaName);
+  })
+  .filter(([refPointer]) => {
+    const node = getNodeAtPointer(doc, refPointer);
+    if (node === undefined) return true;
+    if (isExplicitlyOpen(node)) {
+      if (forceSealing) return true;
+      const name = schemaNameFromPointer(refPointer) ?? refPointer;
+      console.warn(
+        `[SEAL-SCHEMA] Schema "${name}" has additionalProperties/unevaluatedProperties set to true (explicitly open). Skipping sealing. Use forceSealing option to override.`
+      );
+      return false;
+    }
+    return !isAlreadySealed(node);
   })
   .map(([refPointer, refValues]) => {
     return {
@@ -147,25 +196,31 @@ function calculateMappings(allRefs: Record<string, string[]>): Mappings[] {
 }
 
 
-function filterCompositions(allOfSchemas: any[], allRefs: Record<string, string[]>): any[] {
+function filterCompositions(allOfSchemas: any[], allRefs: Record<string, string[]>, exclude: string[]): any[] {
   return allOfSchemas.filter((item) => {
     const arr = JSONPath.toPathArray(item.path);
     arr.pop(); // remove 'allOf'
+    if (isInsideNot(arr)) return false;
     const pointer = JSONPath.toPointer(arr);
+    const schemaName = schemaNameFromPointer(pointer);
+    if (schemaName !== undefined && exclude.includes(schemaName)) return false;
     const refs = allRefs[pointer];
     return refs == undefined || !refs.some(x => isAllOf(x));
   });
 }
 
 
-function filter(allProps: any[], allRefs: Record<string, string[]>): any[] {
+function filter(allProps: any[], allRefs: Record<string, string[]>, exclude: string[]): any[] {
   const inlineComposed = (prop: string[]): boolean => {
     return prop.length > 2 && prop[prop.length - 2] === "allOf";
   }
 
   const filtered = allProps.filter((prop) => {
     const path = JSONPath.toPathArray(prop.path).slice(0, -1);
+    if (isInsideNot(path)) return false;
     const pointer = JSONPath.toPointer(path);
+    const schemaName = schemaNameFromPointer(pointer);
+    if (schemaName !== undefined && exclude.includes(schemaName)) return false;
     const refs = allRefs[pointer];
     return !inlineComposed(path) && (refs === undefined || refs.every(x => !isAllOf(x)));
   });
@@ -297,4 +352,34 @@ function isStandaloneJsonSchema(doc: any): boolean {
     doc.definitions !== undefined;
 
   return hasSchemaIndicators;
+}
+
+function isInsideNot(pathArray: string[]): boolean {
+  return pathArray.includes("not");
+}
+
+function schemaNameFromPointer(pointer: string): string | undefined {
+  // Matches /components/schemas/{name}, /definitions/{name}, /$defs/{name}
+  const m = pointer.match(/^\/(?:components\/schemas|definitions|\$defs)\/([^/]+)$/);
+  return m ? m[1] : undefined;
+}
+
+function isExplicitlyOpen(obj: any): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  return obj.additionalProperties === true || obj.unevaluatedProperties === true;
+}
+
+function isAlreadySealed(obj: any): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  return obj.additionalProperties !== undefined || obj.unevaluatedProperties !== undefined;
+}
+
+function getNodeAtPointer(doc: any, pointer: string): any {
+  const parts = pointer.split("/").slice(1); // remove leading ""
+  let node: any = doc;
+  for (const part of parts) {
+    if (node == null || typeof node !== "object") return undefined;
+    node = node[part];
+  }
+  return node;
 }

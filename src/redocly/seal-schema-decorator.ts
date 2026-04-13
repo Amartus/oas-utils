@@ -7,6 +7,8 @@ export default function SealSchemaDecorator(opts: any) {
         sealSchema(target, {
           useUnevaluatedProperties: opts?.useUnevaluatedProperties !== false,
           uplift: opts?.uplift === true,
+          exclude: opts?.exclude,
+          forceSealing: opts?.forceSealing === true,
         });
       },
     },
