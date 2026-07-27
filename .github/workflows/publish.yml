@@ -17,10 +17,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      # Ensure npm supports trusted publishing (docs: 11.5.1+)
+      # Ensure npm supports trusted publishing (docs: 11.5.1+).
+      # Needs Node >= 22: npm@latest (12.x) refuses to install on Node 20.
       - name: Update npm
         run: npm i -g npm@latest
 
