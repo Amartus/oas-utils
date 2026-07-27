@@ -907,4 +907,76 @@ describe("removeUnusedSchemas (unit tests)", () => {
     expect(result.components.schemas.Unused).toBeUndefined();
   });
 
+  // Regression: https://github.com/Amartus/oas-utils/issues/4
+  // A schema $ref reachable from paths more than once used to fall through into the
+  // schema body walk, which marked its allOf parent as directly referenced and thus
+  // resurrected every sibling subtype of that parent.
+  const siblingDoc = (refSubTwice: boolean) => builders.doc(
+    {
+      "/subs": {
+        get: {
+          responses: {
+            "200": builders.arrayResponse("Sub", "array"),
+            ...(refSubTwice ? { "201": builders.jsonResponse("Sub", "single") } : {})
+          }
+        }
+      }
+    },
+    {
+      Base: builders.schema.withProps({ kind: { type: "string" } }),
+      Sub: builders.schema.allOf(["Base"],
+        builders.schema.withProps({ a: { type: "string" } })),
+      Orphan: builders.schema.allOf(["Base"],
+        builders.schema.withProps({ b: { type: "string" } }))
+    }
+  );
+
+  it("should prune an orphaned allOf sibling when its sibling is referenced twice from paths", () => {
+    const result = removeUnusedSchemas(siblingDoc(true), { aggressive: true });
+
+    expect(result.components.schemas.Sub).toBeDefined();
+    expect(result.components.schemas.Base).toBeDefined();
+    expect(result.components.schemas.Orphan).toBeUndefined();
+  });
+
+  it("should prune identically whether a schema is referenced once or twice", () => {
+    const once = removeUnusedSchemas(siblingDoc(false), { aggressive: true });
+    const twice = removeUnusedSchemas(siblingDoc(true), { aggressive: true });
+
+    expect(Object.keys(twice.components.schemas).sort())
+      .toEqual(Object.keys(once.components.schemas).sort());
+  });
+
+  it("should still promote allOf children when the base itself is referenced from paths", () => {
+    const doc = builders.doc(
+      {
+        "/subs": {
+          get: {
+            responses: {
+              "200": builders.arrayResponse("Sub", "array"),
+              "201": builders.jsonResponse("Sub", "single")
+            }
+          }
+        },
+        "/bases": builders.path("get", builders.jsonResponse("Base"))
+      },
+      {
+        Base: builders.schema.withProps({ kind: { type: "string" } }),
+        Sub: builders.schema.allOf(["Base"],
+          builders.schema.withProps({ a: { type: "string" } })),
+        Sibling: builders.schema.allOf(["Base"],
+          builders.schema.withProps({ b: { type: "string" } })),
+        Unrelated: builders.schema.simple("string")
+      }
+    );
+
+    const result = removeUnusedSchemas(doc);
+
+    // Base is directly referenced, so its subtypes are still promoted
+    expect(result.components.schemas.Base).toBeDefined();
+    expect(result.components.schemas.Sub).toBeDefined();
+    expect(result.components.schemas.Sibling).toBeDefined();
+    expect(result.components.schemas.Unrelated).toBeUndefined();
+  });
+
 });

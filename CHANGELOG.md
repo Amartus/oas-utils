@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.10.5] - 2026-07-27
+### Fixed
+- `removeUnusedSchemas` no longer keeps unreferenced `allOf` subtypes when a sibling subtype sharing the same base is referenced from `paths` more than once ([#4](https://github.com/Amartus/oas-utils/issues/4)). A repeated schema `$ref` in the path seed walk used to fall through into the schema body, marking its `allOf` parent as directly referenced and promoting every subtype of that parent. Schema `$ref`s are now terminal in that walk; schema bodies are traversed only by the main reference walk, which keeps `allOf` parents out of the promotion roots. Pruning is now independent of how many times a schema is referenced from `paths`, so shared base types no longer need to be listed in `ignoreParents`.
+
 ## [0.10.4] - 2026-04-13
 ### Added
 - `exclude` option on `sealSchema` / `runSealSchema` / CLI `--exclude` / Redocly decorator `exclude`: a list of schema names that are excluded from sealing entirely (no sealing keyword added, no Core/wrapper split).
