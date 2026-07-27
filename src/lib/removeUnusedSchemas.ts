@@ -51,10 +51,15 @@ export function removeUnusedSchemas(doc: any, opts: RemoveOptions = {}): any {
 
   const handlePathReference = (refStr: string) => {
     const n = refToName(refStr);
-    if (n && !used.has(n)) {
-      used.add(n);
-      directlyReferenced.add(n); // Mark as directly referenced
-      queue.push(n);
+    if (n) {
+      // Schema refs are terminal here: their bodies are walked by the queue below,
+      // which keeps allOf parents out of directlyReferenced. Recursing into a schema
+      // body from here would wrongly promote its allOf parents to directlyReferenced.
+      if (!used.has(n)) {
+        used.add(n);
+        directlyReferenced.add(n); // Mark as directly referenced
+        queue.push(n);
+      }
       return;
     }
     const m = refStr.match(/^#\/components\/([^\/]+)\/([^#\/]+)$/);
