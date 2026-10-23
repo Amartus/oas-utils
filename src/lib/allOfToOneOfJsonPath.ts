@@ -1,8 +1,8 @@
 import { JSONPath } from 'jsonpath-plus';
 import { AllOfToOneOfOptions } from './allOfToOneOfInterface.js';
-import { refToName, buildInheritanceGraph, getDescendants, getAncestors } from './oasUtils.js';
+import { refToName, buildInheritanceGraph, getDescendants, getAncestors, getOpenApiVersion } from './oasUtils.js';
 import { addDiscriminatorConst as applyDiscriminatorConst } from './addDiscriminatorConst.js';
-import { createConstConstraint, hasConstOrEnumConstraint } from './discriminatorConstraintUtils.js';
+import { constructForOpenApiVersion, createConstConstraint, hasConstOrEnumConstraint, type Construct } from './discriminatorConstraintUtils.js';
 
 /**
  * Third implementation of allOfToOneOf using JSONPath library.
@@ -21,7 +21,8 @@ import { createConstConstraint, hasConstOrEnumConstraint } from './discriminator
  *    - If yes, create polymorphic wrapper
  * 4. Rewire references using JSONPath
  * 5. Remove discriminators from parents
- * 6. Optionally add const constraints to children
+ * 6. Optionally add discriminator constraints (const on OAS 3.1.x, enum otherwise),
+ *    on the wrappers' oneOf branches or on the mapped children
  * 7. Handle nested hierarchies (chain wrappers)
  */
 
@@ -246,7 +247,8 @@ function createPolymorphicWrappers(
   discriminatorParents: Map<string, DiscriminatorInfo>,
   inheritanceGraph: Map<string, Set<string>>,
   doc: OpenAPIDocument,
-  opts: AllOfToOneOfOptions
+  opts: AllOfToOneOfOptions,
+  construct: Construct
 ): Map<string, WrapperInfo> {
   const wrappers = new Map<string, WrapperInfo>();
   const allWarnings: string[] = [];
@@ -308,9 +310,10 @@ function createPolymorphicWrappers(
       }
     }
 
-    // Optionally add const constraints to children (before building oneOf so mapping stays current)
-    if (opts.addDiscriminatorConst !== false) {
-      const result = addDiscriminatorConstToChildren(schemas, childrenForWrapper, discInfo, parentName, schemasGettingWrappers);
+    // In children placement, add constraints to children (before building oneOf so mapping stays current).
+    // oneOf-branches placement constrains the finished wrappers instead (addDiscriminatorConstToBranches).
+    if (opts.addDiscriminatorConst !== false && opts.discriminatorConstPlacement === 'children') {
+      const result = addDiscriminatorConstToChildren(schemas, childrenForWrapper, discInfo, parentName, schemasGettingWrappers, construct);
       if (result.updatedMapping) {
         discInfo.mapping = result.updatedMapping;
       }
@@ -346,15 +349,16 @@ function createPolymorphicWrappers(
 }
 
 /**
- * Add const constraints to children.
- * For parent self-references, creates a wrapper schema with allOf + const.
+ * Add discriminator constraints to children (children placement).
+ * For parent self-references, creates a wrapper schema with allOf + constraint.
  */
 function addDiscriminatorConstToChildren(
   schemas: Record<string, SchemaObject>,
   childNames: string[],
   discInfo: DiscriminatorInfo,
   parentName: string,
-  schemasGettingWrappers: Set<string>
+  schemasGettingWrappers: Set<string>,
+  construct: Construct
 ): { updatedMapping?: Record<string, string> } {
   const updatedMapping: Record<string, string> = { ...discInfo.mapping };
   let mappingChanged = false;
@@ -378,7 +382,7 @@ function addDiscriminatorConstToChildren(
       schemas[wrapperName] = {
         allOf: [
           { $ref: `#/components/schemas/${parentName}` },
-          createConstConstraint(discInfo.propertyName, discriminatorValue, 'const')
+          createConstConstraint(discInfo.propertyName, discriminatorValue, construct)
         ]
       };
       updatedMapping[discriminatorValue] = `#/components/schemas/${wrapperName}`;
@@ -399,11 +403,42 @@ function addDiscriminatorConstToChildren(
 
     // Use shared helper to check for existing constraint
     if (!hasConstOrEnumConstraint(childSchema, discInfo.propertyName, discriminatorValue)) {
-      childSchema.allOf.push(createConstConstraint(discInfo.propertyName, discriminatorValue, 'const'));
+      childSchema.allOf.push(createConstConstraint(discInfo.propertyName, discriminatorValue, construct));
     }
   }
 
   return mappingChanged ? { updatedMapping } : {};
+}
+
+/**
+ * Add discriminator constraints to the oneOf branches of the created wrappers
+ * (oneOf-branches placement). Runs once chaining and merging are done, so each wrapper
+ * has its final branches. A branch that points to another created wrapper is a nested
+ * union whose own branches carry the constraints, so it is left as is.
+ */
+function addDiscriminatorConstToBranches(
+  schemas: Record<string, SchemaObject>,
+  wrappers: Map<string, WrapperInfo>,
+  construct: Construct
+): void {
+  const wrapperRefs = new Set(
+    Array.from(wrappers.values(), ({ wrapperName }) => `#/components/schemas/${wrapperName}`)
+  );
+
+  for (const { wrapperName } of wrappers.values()) {
+    const wrapper = schemas[wrapperName];
+    if (!hasDiscriminator(wrapper) || !Array.isArray(wrapper.oneOf)) continue;
+
+    const { propertyName, mapping } = wrapper.discriminator;
+    wrapper.oneOf = wrapper.oneOf.map((entry): SchemaReference | SchemaObject => {
+      if (!isSchemaReference(entry) || wrapperRefs.has(entry.$ref)) return entry;
+
+      const values = Object.keys(mapping).filter(value => mapping[value] === entry.$ref);
+      return values.length > 0
+        ? { allOf: [{ $ref: entry.$ref }, createConstConstraint(propertyName, values, construct)] }
+        : entry;
+    });
+  }
 }
 
 /**
@@ -759,6 +794,8 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
 
   const shouldAddDiscriminatorConst = opts.addDiscriminatorConst !== false;
   const shouldAddConstToExistingOneOf = opts.addDiscriminatorConstToExistingOneOf === true;
+  const placement = opts.discriminatorConstPlacement ?? 'oneOf-branches';
+  const construct = constructForOpenApiVersion(getOpenApiVersion(doc));
 
   const discriminatorParents = findDiscriminatorParents(schemas);
 
@@ -768,7 +805,7 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
   }
 
   const inheritanceGraph = buildInheritanceGraph(schemas);
-  const wrappers = createPolymorphicWrappers(schemas, discriminatorParents, inheritanceGraph, doc, opts);
+  const wrappers = createPolymorphicWrappers(schemas, discriminatorParents, inheritanceGraph, doc, opts, construct);
 
   if (wrappers.size > 0) {
     replaceReferencesWithWrappers(doc, wrappers);
@@ -785,13 +822,18 @@ export function allOfToOneOf(doc: OpenAPIDocument, opts: AllOfToOneOfOptions = {
     removeDiscriminatorFromParents(schemas, wrappers, doc);
   }
 
-  // Post-pass: apply discriminator consts to all oneOf+discriminator schemas,
-  // including schemas that already existed in the source document.
+  if (shouldAddDiscriminatorConst && placement !== 'children') {
+    addDiscriminatorConstToBranches(schemas, wrappers, construct);
+  }
+
+  // Post-pass: apply discriminator constraints to the oneOf+discriminator schemas that
+  // already existed in the source document. The created wrappers are constrained above.
   if (shouldAddDiscriminatorConst && shouldAddConstToExistingOneOf) {
     applyDiscriminatorConst(doc, {
-      mode: 'const',
-      placement: opts.discriminatorConstPlacement ?? 'oneOf-branches',
+      mode: 'auto',
+      placement,
       compatibilityMode: opts.discriminatorConstCompatibilityMode ?? true,
+      exclude: Array.from(wrappers.values(), ({ wrapperName }) => wrapperName),
     });
   }
 

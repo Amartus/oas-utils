@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0] - 2026-10-23
+### Fixed
+- `allOfToOneOf` no longer emits `const` into OpenAPI 3.0.x documents ([#7](https://github.com/Amartus/oas-utils/issues/7)). Discriminator constraints now use `const` for OpenAPI 3.1.x and `enum` otherwise, the keyword `addDiscriminatorConst` picks in `auto` mode, so `allof-to-oneof` gives the same output as `allof-to-oneof --no-add-discriminator-const` followed by `add-discriminator-const`.
+- `allOfToOneOf` now honours `discriminatorConstPlacement` for the wrappers it creates and constrains each mapped schema once ([#7](https://github.com/Amartus/oas-utils/issues/7)). With `oneOf-branches` (the default), child schemas used to receive a `const` anyway, and with `addDiscriminatorConstToExistingOneOf` (the CLI default) the `oneOf` branches were then constrained a second time.
+- The `addDiscriminatorConstToExistingOneOf` post-pass now processes only the `oneOf` + discriminator schemas of the input document, as documented, not the wrappers `allOfToOneOf` creates. In nested hierarchies, where a mapped schema has its own wrapper, it used to add a second branch for that schema with `oneOf-branches`, so the schema's own instances matched two branches; with `children`, it constrained that schema to its own discriminator value, which every schema extending it inherits.
+- The `oas-utils/allof-to-oneof` Redocly decorator now passes `addDiscriminatorConstToExistingOneOf`, `discriminatorConstPlacement` and `discriminatorConstCompatibilityMode` through to `allOfToOneOf`, as the README documents; they were ignored.
+
+### Changed
+- With the default `oneOf-branches` placement, `allOfToOneOf` no longer creates `<Base>OneOf` schemas: a base mapped to itself is constrained on its `oneOf` branch like every other mapped schema, and its mapping entry keeps pointing at the base. With default options, the library and the Redocly decorator therefore put the constraints on the wrappers' `oneOf` branches instead of the child schemas. `discriminatorConstPlacement: 'children'` keeps the previous layout, `<Base>OneOf` schemas included.
+
+### Added
+- `exclude` option on `addDiscriminatorConst`: names of `oneOf` + discriminator schemas to leave untouched.
+
 ## [0.10.5] - 2026-07-27
 ### Fixed
 - `removeUnusedSchemas` no longer keeps unreferenced `allOf` subtypes when a sibling subtype sharing the same base is referenced from `paths` more than once ([#4](https://github.com/Amartus/oas-utils/issues/4)). A repeated schema `$ref` in the path seed walk used to fall through into the schema body, marking its `allOf` parent as directly referenced and promoting every subtype of that parent. Schema `$ref`s are now terminal in that walk; schema bodies are traversed only by the main reference walk, which keeps `allOf` parents out of the promotion roots. Pruning is now independent of how many times a schema is referenced from `paths`, so shared base types no longer need to be listed in `ignoreParents`.

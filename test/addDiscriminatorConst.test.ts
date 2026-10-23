@@ -366,6 +366,28 @@ describe("addDiscriminatorConst", () => {
     });
   });
 
+  describe("main function - exclude", () => {
+    for (const placement of ["oneOf-branches", "children"] as const) {
+      it(`leaves excluded schemas and their mapped children untouched (${placement})`, () => {
+        const doc = new TestDocBuilder()
+          .withOpenApi("3.1.0")
+          .withParent("Animal", "type", { cat: "Cat" })
+          .withParent("Vehicle", "kind", { car: "Car" })
+          .withSchema("Cat", objectSchema())
+          .withSchema("Car", objectSchema())
+          .build();
+        const before = JSON.parse(JSON.stringify(doc.components.schemas));
+
+        const result = addDiscriminatorConst(doc, { placement, exclude: ["Vehicle"] });
+
+        expect(result.schemasUpdated).toBe(1);
+        expect(result.constAdded).toBe(1);
+        expect(doc.components.schemas.Vehicle).toEqual(before.Vehicle);
+        expect(doc.components.schemas.Car).toEqual(before.Car);
+      });
+    }
+  });
+
   describe("main function - no changes scenarios", () => {
     it("ignores schema without discriminator", () => {
       const doc: any = {
