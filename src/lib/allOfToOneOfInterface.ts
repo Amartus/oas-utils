@@ -4,7 +4,11 @@
 
 
 export interface AllOfToOneOfOptions {
-  /** If true, add const property with discriminator value to specialization schemas (default: true) */
+  /**
+   * If true, constrain each specialization of a created oneOf wrapper to its discriminator
+   * value, where `discriminatorConstPlacement` says (default: true). The constraint uses
+   * `const` for OpenAPI 3.1.x documents and `enum` otherwise.
+   */
   addDiscriminatorConst?: boolean;
   /**
    * If true, also add discriminator consts for pre-existing oneOf+discriminator
@@ -17,9 +21,10 @@ export interface AllOfToOneOfOptions {
    */
   discriminatorConstCompatibilityMode?: boolean;
   /**
-   * Placement strategy for post-pass discriminator constraints.
-   * - 'oneOf-branches' (default): attach constraints to oneOf branches
-   * - 'children': attach constraints directly to mapped child schemas (legacy)
+   * Placement strategy for discriminator constraints.
+   * - 'oneOf-branches' (default): attach constraints to oneOf branches; child schemas are left unchanged
+   * - 'children': attach constraints directly to mapped child schemas; a parent mapped to
+   *   itself gets a `<Parent>OneOf` schema carrying its constraint (legacy)
    */
   discriminatorConstPlacement?: 'oneOf-branches' | 'children';
   /** If true, skip oneOf transformation if only one specialization is found (default: false) */

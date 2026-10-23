@@ -16,28 +16,25 @@ describe('Inheritance-only parent schema', () => {
     expect(result.components.schemas.Parent.discriminator).toBeUndefined();
   });
 
-  it('should not add const to parent when creating OneOf wrapper for it', () => {
+  it('should not add a constraint to the parent when creating its OneOf wrapper (children placement)', () => {
     const input = parse(readFileSync('test/resources/inheritance-only-parent.input.yaml', 'utf-8'));
-    const result = allOfToOneOf(input, { addDiscriminatorConst: true });
+    const result = allOfToOneOf(input, { addDiscriminatorConst: true, discriminatorConstPlacement: 'children' });
 
-    // Child should NOT have const added to it directly
+    // Child should NOT have a constraint added to it directly
     const child = result.components.schemas.Child;
     expect(child.allOf).toBeDefined();
 
-    // Check that const is not in Child's allOf
-    const hasConst = child.allOf.some((item: any) =>
-      item?.properties?.['@type']?.const === 'Child'
-    );
-    expect(hasConst).toBe(false);
+    const hasConstraint = child.allOf.some((item: any) => item?.properties?.['@type'] !== undefined);
+    expect(hasConstraint).toBe(false);
 
-    // But ChildOneOf SHOULD exist with the const
+    // But ChildOneOf SHOULD exist with the constraint (enum, because the document is OpenAPI 3.0.1)
     expect(result.components.schemas.ChildOneOf).toBeDefined();
     expect(result.components.schemas.ChildOneOf.allOf).toBeDefined();
 
-    const oneOfHasConst = result.components.schemas.ChildOneOf.allOf.some(
-      (item: any) => item?.properties?.['@type']?.const === 'Child'
+    const oneOfHasConstraint = result.components.schemas.ChildOneOf.allOf.some(
+      (item: any) => Array.isArray(item?.properties?.['@type']?.enum) && item.properties['@type'].enum.includes('Child')
     );
-    expect(oneOfHasConst).toBe(true);
+    expect(oneOfHasConstraint).toBe(true);
   });
 
   it('should match expected output', () => {
@@ -49,12 +46,13 @@ describe('Inheritance-only parent schema', () => {
     // Compare schemas
     expect(result.components.schemas.Parent).toEqual(expected.components.schemas.Parent);
     expect(result.components.schemas.Child).toEqual(expected.components.schemas.Child);
-    expect(result.components.schemas.ChildOneOf).toEqual(expected.components.schemas.ChildOneOf);
+    expect(result.components.schemas.GrandChild).toEqual(expected.components.schemas.GrandChild);
     expect(result.components.schemas.ChildPolymorphic).toEqual(expected.components.schemas.ChildPolymorphic);
 
     // Verify unwanted schemas don't exist
     expect(result.components.schemas.ParentPolymorphic).toBeUndefined();
     expect(result.components.schemas.ParentOneOf).toBeUndefined();
+    expect(result.components.schemas.ChildOneOf).toBeUndefined();
   });
 
   it('should only create wrappers for schemas that are actually referenced', () => {
@@ -64,9 +62,9 @@ describe('Inheritance-only parent schema', () => {
     // Count schemas
     const schemaNames = Object.keys(result.components.schemas);
 
-    // Should have: Entity, Parent, Child, GrandChild, 
-    // Sibling, ChildOneOf, ChildPolymorphic
-    expect(schemaNames.length).toBe(7);
+    // Should have: Entity, Parent, Child, GrandChild,
+    // Sibling, ChildPolymorphic
+    expect(schemaNames.length).toBe(6);
 
     // Should NOT have unused wrappers
     expect(schemaNames).not.toContain('ParentPolymorphic');

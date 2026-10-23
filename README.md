@@ -102,9 +102,11 @@ Options:
 - --no-add-discriminator-const: do not add discriminator constraints.
 - --no-add-discriminator-const-to-existing-oneof: do not add discriminator constraints for pre-existing `oneOf + discriminator` schemas.
 - --discriminator-const-placement: where discriminator constraints are injected:
-  - `oneOf-branches` (default): wraps each oneOf branch as `allOf: [$ref, constraint]`.
-  - `children` (legacy): injects constraints directly into mapped child schemas.
+  - `oneOf-branches` (default): wraps each oneOf branch as `allOf: [$ref, constraint]`; child schemas are left unchanged.
+  - `children` (legacy): injects constraints directly into mapped child schemas; a base mapped to itself gets a `<Base>OneOf` schema carrying its constraint.
 - --discriminator-const-compatibility-mode: only relevant for `children` placement; skips allOf parent schemas if another mapped schema extends them.
+
+Constraints use `const` for OpenAPI 3.1.x documents and `enum` otherwise, the same keyword `add-discriminator-const` picks in its default `auto` mode; the document's `openapi` version is not changed. Each mapped schema is constrained once, in the place the placement names.
 - --ignore-single-specialization: skip oneOf transformation if only one specialization is found (useful for bases with only one concrete implementation).
 - --merge-nested-oneof: merge nested oneOf schemas by inlining references to schemas that only contain oneOf.
 
@@ -112,7 +114,7 @@ Example transformation (with addDiscriminatorConst enabled, default placement `o
 - Base schema `Animal` with discriminator `type` and mapping `{Cat: ..., Dog: ...}`
 - Concrete schemas `Cat` and `Dog` with `allOf: [{$ref: Animal}, {...}]`
 - Creates `AnimalPolymorphic` with `oneOf: [Cat, Dog]` and the same discriminator
-- Adds branch constraints such as:
+- Adds branch constraints such as (OpenAPI 3.1.x; a 3.0.x document gets `enum: ["Cat"]`):
   - `allOf: [{$ref: Cat}, {properties: {type: {const: "Cat"}}}]`
   - `allOf: [{$ref: Dog}, {properties: {type: {const: "Dog"}}}]`
 - Replaces references to `Animal` with `AnimalPolymorphic` in array items and other polymorphic contexts

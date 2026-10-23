@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { AllOfToOneOfTransform } from "../src/lib/allOfToOneOfInterface.js";
 import { allOfToOneOf } from "../src/lib/allOfToOneOfJsonPath.js";
+import { addDiscriminatorConst } from "../src/lib/addDiscriminatorConst.js";
 import { testSchemas } from "./schemaLoader.js";
 import { createDoc, objectSchema, oneOfRefs, ref } from "./testBuilders.js";
 
@@ -56,6 +57,32 @@ function jsonResponsePath(pathName: string, schemaName: string, description = "o
       },
     },
   };
+}
+
+/** The $ref a oneOf branch points to, whether bare or wrapped as allOf: [$ref, constraint]. */
+function branchRef(entry: any): string | undefined {
+  return entry?.$ref ?? entry?.allOf?.find((item: any) => typeof item?.$ref === "string")?.$ref;
+}
+
+/** The const/enum constraints on a property found in a schema's own allOf items. */
+function constraintsOn(schema: any, propName: string): any[] {
+  return (schema?.allOf ?? [])
+    .map((item: any) => item?.properties?.[propName])
+    .filter((prop: any) => prop && ("const" in prop || "enum" in prop));
+}
+
+/** How many const/enum constraints on a property admit a value, anywhere in the component schemas. */
+function constraintCount(doc: any, propName: string, value: string): number {
+  let count = 0;
+  const visit = (node: any): void => {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (!node || typeof node !== "object") return;
+    const prop = node.properties?.[propName];
+    if (prop?.const === value || (Array.isArray(prop?.enum) && prop.enum.includes(value))) count++;
+    Object.values(node).forEach(visit);
+  };
+  visit(doc.components.schemas);
+  return count;
 }
 
 /**
@@ -229,6 +256,29 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
       expect(comparison.equal, `Differences:\n${comparison.diffs.join('\n')}`).toBe(true);
     });
 
+    it("nested-oneof-discriminators - with discriminatorConstPlacement: children", async () => {
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const base = path.resolve(__dirname, "resources", "nested-oneof-discriminators");
+      const inputPath = base + ".input.yaml";
+      const expectedPath = base + ".children.expected.yaml";
+
+      const input = await loadYaml(inputPath);
+      const expected = await loadYaml(expectedPath);
+
+      const result = transform(deepClone(input), { discriminatorConstPlacement: "children" });
+      const comparison = deepEqualUnordered(result, expected);
+
+      if (!comparison.equal) {
+        console.log(`\n❌ Test failed: nested-oneof-discriminators (children)`);
+        console.log(`\n📋 Differences found (${comparison.diffs.length}):`);
+        comparison.diffs.forEach((diff, i) => console.log(`  ${i + 1}. ${diff}`));
+        console.log(`\n📄 Full actual result:\n${JSON.stringify(result, null, 2)}`);
+        console.log(`\n📄 Full expected result:\n${JSON.stringify(expected, null, 2)}`);
+      }
+
+      expect(comparison.equal, `Differences:\n${comparison.diffs.join('\n')}`).toBe(true);
+    });
+
     for (const testCase of ["extensible-allof-nested-discriminators", "extensible-only-allof-to-oneof"]) {
       it(`${testCase} - with addDiscriminatorConst: false and mergeNestedOneOf: true`, async () => {
         const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -297,7 +347,7 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     });
   });
 
-  it("converts allOf + discriminator to oneOf + discriminator with const properties", () => {
+  it("converts allOf + discriminator to oneOf + discriminator with constrained branches", () => {
     const doc: any = createDoc({
       schemas: {
         Animal: testSchemas.animalWithDiscriminator({
@@ -328,8 +378,12 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     expect(result.components.schemas.AnimalPolymorphic).toBeDefined();
     expect(result.components.schemas.AnimalPolymorphic.oneOf).toHaveLength(2);
     expect(result.components.schemas.AnimalPolymorphic.discriminator.propertyName).toBe("type");
-    expect(result.components.schemas.Cat.allOf.find((item: any) => item.properties?.type?.const === "Cat")).toBeDefined();
-    expect(result.components.schemas.Dog.allOf.find((item: any) => item.properties?.type?.const === "Dog")).toBeDefined();
+    const branches = result.components.schemas.AnimalPolymorphic.oneOf;
+    expect(branches.map(branchRef)).toEqual([ref("Cat"), ref("Dog")]);
+    expect(constraintsOn(branches[0], "type")).toEqual([{ enum: ["Cat"] }]);
+    expect(constraintsOn(branches[1], "type")).toEqual([{ enum: ["Dog"] }]);
+    expect(result.components.schemas.Cat).toEqual(doc.components.schemas.Cat);
+    expect(result.components.schemas.Dog).toEqual(doc.components.schemas.Dog);
     expect(result.components.schemas.Human.properties.pets.items.$ref).toBe("#/components/schemas/AnimalPolymorphic");
     expect(result.components.schemas.Animal.discriminator).toBeUndefined();
   });
@@ -357,28 +411,25 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
 
     // Wrapper should be generated because A is referenced from paths
     expect(result.components.schemas.APolymorphic).toBeDefined();
-    expect(result.components.schemas.AOneOf).toBeDefined();
+    expect(result.components.schemas.AOneOf).toBeUndefined();
 
     // Parent discriminator is removed after transformation
     expect(result.components.schemas.A.discriminator).toBeUndefined();
 
-    // A self-mapping should be redirected to AOneOf and carry const there
-    const aMappingRef = result.components.schemas.APolymorphic.discriminator.mapping.A;
-    expect(aMappingRef).toBe("#/components/schemas/AOneOf");
-    const aOneOfConst = result.components.schemas.AOneOf.allOf.find(
-      (item: any) => item?.properties?.["@type"]?.const === "A"
-    );
-    expect(aOneOfConst).toBeDefined();
+    // A self-mapping keeps pointing at A; like B and C, its branch carries the
+    // constraint (enum, because the document is OpenAPI 3.0.0), exactly once
+    const aPolymorphic = result.components.schemas.APolymorphic;
+    expect(aPolymorphic.discriminator.mapping.A).toBe(ref("A"));
+    expect(aPolymorphic.oneOf.map(branchRef)).toEqual([ref("A"), ref("B"), ref("C")]);
+    expect(aPolymorphic.oneOf.map((branch: any) => constraintsOn(branch, "@type"))).toEqual([
+      [{ enum: ["A"] }],
+      [{ enum: ["B"] }],
+      [{ enum: ["C"] }],
+    ]);
 
-    // Specializations should have consts inline
-    const bConst = result.components.schemas.B.allOf.find(
-      (item: any) => item?.properties?.["@type"]?.const === "B"
-    );
-    const cConst = result.components.schemas.C.allOf.find(
-      (item: any) => item?.properties?.["@type"]?.const === "C"
-    );
-    expect(bConst).toBeDefined();
-    expect(cConst).toBeDefined();
+    // Specializations are left unchanged
+    expect(result.components.schemas.B).toEqual(doc.components.schemas.B);
+    expect(result.components.schemas.C).toEqual(doc.components.schemas.C);
 
     // If any Core variant exists (e.g. from future composition steps),
     // keep this assertion resilient and verify no duplicate A const is added there.
@@ -430,7 +481,7 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     const result = transform(deepClone(doc));
 
     expect(result.components.schemas.CarPolymorphic).toBeDefined();
-    const carRefs = result.components.schemas.CarPolymorphic.oneOf.map((item: any) => item.$ref);
+    const carRefs = result.components.schemas.CarPolymorphic.oneOf.map(branchRef);
     expect(carRefs).toContain("#/components/schemas/ElectricCar");
     expect(carRefs).toContain("#/components/schemas/CommercialCar");
 
@@ -540,7 +591,7 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
     const result = transform(deepClone(doc));
 
     expect(result.components.schemas.AnimalPolymorphic).toBeDefined();
-    expect(result.components.schemas.AnimalOneOf).toBeDefined();
+    expect(result.components.schemas.AnimalPolymorphic.oneOf.map(branchRef)).toEqual([ref("Animal"), ref("Dog")]);
     expect(result.components.schemas.Animal.discriminator).toBeUndefined();
   });
 
@@ -676,11 +727,119 @@ describe.each(implementations)("allOfToOneOf ($name implementation)", ({ name, t
 
     // Verify wrappers were created
     expect(result.components.schemas.PricePolymorphic).toBeDefined();
-    expect(result.components.schemas.PriceOneOf).toBeDefined();
+    expect(result.components.schemas.PricePolymorphic.oneOf.map(branchRef)).toEqual([ref("Price"), ref("PremiumPrice")]);
     expect(result.components.schemas.Price.discriminator).toBeUndefined();
 
     // Verify the nested reference was replaced
     const productPricingItems = result.components.schemas.Product.allOf[1].properties.pricing.items;
     expect(productPricingItems.$ref).toBe("#/components/schemas/PricePolymorphic");
   });
+
+  // Regression: https://github.com/Amartus/oas-utils/issues/7
+  // Every mapped child used to get a hard-coded `const`, whatever the OpenAPI version and
+  // the placement, and the post-pass then constrained the oneOf branches a second time.
+  // Constraints now follow the document version (enum before 3.1) and the placement, once each.
+  const animalsDoc = (openapi: string) => createDoc({
+    openapi,
+    paths: jsonResponsePath("/animals", "Animal"),
+    schemas: {
+      Animal: discriminatorSchema("@type", { Cat: "Cat", Dog: "Dog" }, {
+        required: ["@type"],
+        properties: { "@type": { type: "string" } },
+      }),
+      Cat: allOfChild("Animal", { whiskers: { type: "boolean" } }),
+      Dog: allOfChild("Animal", { barkVolume: { type: "integer" } }),
+    },
+  });
+
+  for (const openapi of ["3.0.3", "3.1.0"]) {
+    const keyword = openapi === "3.1.0" ? "const" : "enum";
+    for (const discriminatorConstPlacement of ["oneOf-branches", "children"] as const) {
+      for (const addDiscriminatorConstToExistingOneOf of [false, true]) {
+        it(`constrains each type once with ${keyword} for OpenAPI ${openapi} (${discriminatorConstPlacement}, existing oneOf: ${addDiscriminatorConstToExistingOneOf})`, () => {
+          const result = transform(animalsDoc(openapi), { discriminatorConstPlacement, addDiscriminatorConstToExistingOneOf });
+
+          expect(result.openapi).toBe(openapi);
+          expect(JSON.stringify(result)).not.toContain(keyword === "enum" ? '"const"' : '"enum"');
+          expect(constraintCount(result, "@type", "Cat")).toBe(1);
+          expect(constraintCount(result, "@type", "Dog")).toBe(1);
+        });
+      }
+    }
+  }
+
+  it("leaves child schemas unchanged with oneOf-branches placement", () => {
+    const doc = animalsDoc("3.0.3");
+    const result = transform(deepClone(doc), { addDiscriminatorConstToExistingOneOf: true });
+
+    expect(result.components.schemas.Cat).toEqual(doc.components.schemas.Cat);
+    expect(result.components.schemas.Dog).toEqual(doc.components.schemas.Dog);
+    expect(result.components.schemas.AnimalPolymorphic.oneOf.map((branch: any) => constraintsOn(branch, "@type")))
+      .toEqual([[{ enum: ["Cat"] }], [{ enum: ["Dog"] }]]);
+  });
+
+  it("constrains child schemas, not branches, with children placement", () => {
+    const result = transform(animalsDoc("3.0.3"), {
+      addDiscriminatorConstToExistingOneOf: true,
+      discriminatorConstPlacement: "children",
+    });
+
+    expect(result.components.schemas.AnimalPolymorphic.oneOf).toEqual(oneOfRefs("Cat", "Dog"));
+    expect(constraintsOn(result.components.schemas.Cat, "@type")).toEqual([{ enum: ["Cat"] }]);
+    expect(constraintsOn(result.components.schemas.Dog, "@type")).toEqual([{ enum: ["Dog"] }]);
+  });
+
+  it("matches running addDiscriminatorConst after the transform", () => {
+    for (const openapi of ["3.0.3", "3.1.0"]) {
+      const combined = transform(animalsDoc(openapi), { addDiscriminatorConstToExistingOneOf: true });
+      const separate = transform(animalsDoc(openapi), { addDiscriminatorConst: false });
+      addDiscriminatorConst(separate);
+
+      expect(combined).toEqual(separate);
+    }
+  });
+
+  // Animal maps itself, Pet and Bird; Pet has its own wrapper and maps itself, Cat and Dog.
+  // The post-pass used to run over the created wrappers too: with oneOf-branches it added a
+  // second Pet branch next to PetPolymorphic, with children it constrained Pet itself to "Pet",
+  // which Cat and Dog inherit. It now only touches oneOf schemas from the input document.
+  const nestedDoc = () => createDoc({
+    paths: { ...jsonResponsePath("/animals", "Animal"), ...jsonResponsePath("/pets", "Pet") },
+    schemas: {
+      Animal: discriminatorSchema("type", { Animal: "Animal", Pet: "Pet", Bird: "Bird" }, {
+        properties: { id: { type: "string" }, type: { type: "string" } },
+      }),
+      Pet: allOfChild("Animal", { owner: { type: "string" } }, {
+        discriminator: { propertyName: "type", mapping: { Pet: ref("Pet"), Cat: ref("Cat"), Dog: ref("Dog") } },
+      }),
+      Bird: allOfChild("Animal", { wingSpan: { type: "number" } }),
+      Cat: allOfChild("Pet", { lives: { type: "integer" } }),
+      Dog: allOfChild("Pet", { bark: { type: "number" } }),
+    },
+  });
+
+  for (const addDiscriminatorConstToExistingOneOf of [false, true]) {
+    it(`leaves a nested wrapper's branch bare and adds no branch for it (oneOf-branches, existing oneOf: ${addDiscriminatorConstToExistingOneOf})`, () => {
+      const result = transform(nestedDoc(), { addDiscriminatorConstToExistingOneOf });
+      const animalBranches = result.components.schemas.AnimalPolymorphic.oneOf;
+
+      expect(animalBranches.map(branchRef)).toEqual([ref("Animal"), ref("PetPolymorphic"), ref("Bird")]);
+      expect(animalBranches.map((branch: any) => constraintsOn(branch, "type")))
+        .toEqual([[{ enum: ["Animal"] }], [], [{ enum: ["Bird"] }]]);
+      for (const value of ["Animal", "Pet", "Bird", "Cat", "Dog"]) {
+        expect(constraintCount(result, "type", value)).toBe(1);
+      }
+    });
+
+    it(`does not constrain a parent that has its own wrapper (children, existing oneOf: ${addDiscriminatorConstToExistingOneOf})`, () => {
+      const result = transform(nestedDoc(), { addDiscriminatorConstToExistingOneOf, discriminatorConstPlacement: "children" });
+
+      expect(constraintsOn(result.components.schemas.Pet, "type")).toEqual([]);
+      expect(constraintsOn(result.components.schemas.Cat, "type")).toEqual([{ enum: ["Cat"] }]);
+      expect(constraintsOn(result.components.schemas.Dog, "type")).toEqual([{ enum: ["Dog"] }]);
+      for (const value of ["Animal", "Pet", "Bird", "Cat", "Dog"]) {
+        expect(constraintCount(result, "type", value)).toBe(1);
+      }
+    });
+  }
 });

@@ -45,23 +45,33 @@ components:
         furColor:
           type: string
 
-    CatOneOf:
-      allOf:
-        - $ref: "#/components/schemas/Cat"
-        - type: object
-          properties:
-            catType:
-              const: Cat
-
     CatPolymorphic:
       oneOf:
-        - $ref: "#/components/schemas/CatOneOf"
-        - $ref: "#/components/schemas/Lion"
-        - $ref: "#/components/schemas/Panthera"
+        - allOf:
+            - $ref: "#/components/schemas/Cat"
+            - type: object
+              properties:
+                catType:
+                  enum:
+                    - Cat
+        - allOf:
+            - $ref: "#/components/schemas/Lion"
+            - type: object
+              properties:
+                catType:
+                  enum:
+                    - Lion
+        - allOf:
+            - $ref: "#/components/schemas/Panthera"
+            - type: object
+              properties:
+                catType:
+                  enum:
+                    - Panthera
       discriminator:
         propertyName: catType
         mapping:
-          Cat: "#/components/schemas/CatOneOf"
+          Cat: "#/components/schemas/Cat"
           Lion: "#/components/schemas/Lion"
           Panthera: "#/components/schemas/Panthera"
 
@@ -78,10 +88,6 @@ components:
                 - small
                 - medium
                 - large
-        - type: object
-          properties:
-            catType:
-              const: Lion
 
     Panthera:
       allOf:
@@ -92,10 +98,6 @@ components:
           properties:
             spotPattern:
               type: string
-        - type: object
-          properties:
-            catType:
-              const: Panthera
 
     Bird:
       type: object
@@ -112,8 +114,20 @@ components:
 
     BirdPolymorphic:
       oneOf:
-        - $ref: "#/components/schemas/Sparrow"
-        - $ref: "#/components/schemas/Eagle"
+        - allOf:
+            - $ref: "#/components/schemas/Sparrow"
+            - type: object
+              properties:
+                birdType:
+                  enum:
+                    - Sparrow
+        - allOf:
+            - $ref: "#/components/schemas/Eagle"
+            - type: object
+              properties:
+                birdType:
+                  enum:
+                    - Eagle
       discriminator:
         propertyName: birdType
         mapping:
@@ -129,10 +143,6 @@ components:
           properties:
             chirpFrequency:
               type: integer
-        - type: object
-          properties:
-            birdType:
-              const: Sparrow
 
     Eagle:
       allOf:
@@ -143,7 +153,3 @@ components:
           properties:
             huntingRange:
               type: number
-        - type: object
-          properties:
-            birdType:
-              const: Eagle

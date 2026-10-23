@@ -8,7 +8,7 @@
 import { getOpenApiVersion, upgradeToOas31, getAncestors } from './oasUtils.js';
 import { addConstraintsToOneOfBranches } from './addDiscriminatorConst.oneOfBranchesStrategy.js';
 import { addConstraintsToChildren } from './addDiscriminatorConst.childrenStrategy.js';
-import { createConstConstraint, hasConstOrEnumConstraint, type Construct } from './discriminatorConstraintUtils.js';
+import { constructForOpenApiVersion, createConstConstraint, hasConstOrEnumConstraint, type Construct } from './discriminatorConstraintUtils.js';
 import type {
   AddDiscriminatorConstOptions,
   AddDiscriminatorConstResult,
@@ -51,8 +51,7 @@ function resolveConstruct(
     }
   }
 
-  const version = getOpenApiVersion(doc);
-  const supportsConst = Boolean(version?.match(/^3\.1\./));
+  const supportsConst = constructForOpenApiVersion(getOpenApiVersion(doc)) === 'const';
 
   if (mode === 'enum') {
     return 'enum';
@@ -221,12 +220,13 @@ export function addDiscriminatorConst(
   const placement: ConstPlacement = opts.placement ?? 'oneOf-branches';
   const compatibilityMode = opts.compatibilityMode ?? false;
   const forceUplift = opts.forceUplift ?? false;
+  const exclude = new Set(opts.exclude ?? []);
   const construct = resolveConstruct(doc as Record<string, unknown>, mode, forceUplift, result, opts.onWarning);
   const parentIndex = buildAncestorIndex(schemas);
 
   // Process schemas with oneOf + discriminator.mapping
   for (const [schemaName, schema] of Object.entries(schemas)) {
-    if (!isValidObject(schema)) continue;
+    if (!isValidObject(schema) || exclude.has(schemaName)) continue;
 
     // Only target schemas with oneOf + discriminator.mapping
     if (!Array.isArray(schema.oneOf) || !isValidObject(schema.discriminator)) continue;

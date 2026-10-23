@@ -109,7 +109,7 @@ program
   )
   .option(
     "--no-add-discriminator-const",
-    "Do not add const property with discriminator value to specialization schemas",
+    "Do not add discriminator constraints",
     true
   )
   .option(

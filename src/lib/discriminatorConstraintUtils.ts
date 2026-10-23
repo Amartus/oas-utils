@@ -13,6 +13,14 @@ function enumCoversValues(enumValues: unknown, values: string[]): boolean {
 }
 
 /**
+ * The constraint keyword an OpenAPI version supports: `const` for OpenAPI 3.1.x,
+ * `enum` otherwise (`const` is not part of the OpenAPI 3.0 Schema Object).
+ */
+export function constructForOpenApiVersion(oasVersion: string | undefined): Construct {
+  return oasVersion?.match(/^3\.1\./) ? 'const' : 'enum';
+}
+
+/**
  * Create a schema constraint fragment with const or enum.
  */
 export function createConstConstraint(

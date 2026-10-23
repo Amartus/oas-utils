@@ -40,6 +40,12 @@ export interface AddDiscriminatorConstOptions {
    */
   compatibilityMode?: boolean;
 
+  /**
+   * Names of oneOf + discriminator schemas to leave untouched: their oneOf branches
+   * and mapped children receive no constraints on their behalf.
+   */
+  exclude?: string[];
+
   /** Optional callback to receive warnings during transformation. */
   onWarning?: (message: string) => void;
 }
